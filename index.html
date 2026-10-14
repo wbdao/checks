@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>إدارة الشيكات</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css?v=20261014-r2">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🧾 إدارة الشيكات</div>
+  <nav class="tabs">
+    <a href="#checks" data-view="checks">الشيكات</a>
+    <a href="#customers" data-view="customers">تحليل العملاء</a>
+    <a href="#suppliers" data-view="suppliers">متابعة الموردين</a>
+    <a href="#treasury" data-view="treasury">شيكات بالخزنة</a>
+    <a href="#warehouses" data-view="warehouses">شيكات المخازن</a>
+  </nav>
+  <div class="top-actions">
+    <span id="syncInfo" class="muted small"></span>
+    <button class="btn ghost" id="reloadBtn" title="تحديث البيانات من الشيت">⟳ تحديث</button>
+    <button class="btn ghost" id="settingsBtn" title="الإعدادات">⚙ الإعدادات</button>
+  </div>
+</header>
+
+<main>
+  <div id="status" class="status hidden"></div>
+
+  <!-- ===== شاشة الشيكات ===== -->
+  <section id="view-checks" class="view hidden">
+    <div class="kpis" id="checksKpis"></div>
+
+    <div class="card filters">
+      <input type="search" id="fSearch" autocomplete="off" placeholder="بحث: عميل، كود، رقم شيك، NN، بنك، بيان…">
+      <select id="fWh" autocomplete="off"><option value="">كل المخازن</option></select>
+      <select id="fStatus" autocomplete="off"><option value="">كل الحالات</option></select>
+      <select id="fCash" autocomplete="off"><option value="">كل حالات الصرف</option></select>
+      <select id="fDue" autocomplete="off">
+        <option value="">مستحق + تحت التحصيل</option>
+        <option value="مستحق">مستحق</option>
+        <option value="تحت التحصيل">تحت التحصيل</option>
+      </select>
+      <label class="inline">من <input type="date" id="fFrom" autocomplete="off"></label>
+      <label class="inline">إلى <input type="date" id="fTo" autocomplete="off"></label>
+      <label class="inline chk"><input type="checkbox" id="fOpen" autocomplete="off"> غير الخالص فقط</label>
+      <button class="btn ghost" id="colFilterBtn" title="فلترة أي عمود من أعمدة الشيت">⏷ فلتر الشيت</button>
+      <button class="btn ghost" id="fReset">مسح</button>
+      <span class="grow"></span>
+      <button class="btn ghost" id="exportBtn">⬇ تصدير CSV</button>
+      <button class="btn ghost" id="importBtn">📋 إدراج من جدول</button>
+      <button class="btn primary" id="addBtn">＋ إضافة شيك</button>
+      <div id="colChips" class="chips hidden"></div>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-wrap">
+        <table class="grid" id="checksTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager" id="checksPager"></div>
+    </div>
+  </section>
+
+  <!-- ===== شاشة تحليل العملاء ===== -->
+  <section id="view-customers" class="view hidden">
+    <div id="custOverview">
+      <div class="kpis" id="custKpis"></div>
+      <div class="cols">
+        <div class="card chart-card"><h3>أعلى 10 عملاء بالرصيد المفتوح</h3><div class="chart-box tall"><canvas id="chTopOpen"></canvas></div></div>
+        <div class="card chart-card"><h3>الاستحقاقات المفتوحة — الأشهر القادمة</h3><div class="chart-box tall"><canvas id="chUpcoming"></canvas></div></div>
+      </div>
+      <div class="card filters">
+        <input type="search" id="cSearch" autocomplete="off" placeholder="بحث باسم العميل أو الكود…">
+        <select id="cWh" autocomplete="off"><option value="">كل المخازن</option></select>
+        <label class="inline chk"><input type="checkbox" id="cOpenOnly" autocomplete="off" checked> عملاء لديهم رصيد مفتوح فقط</label>
+      </div>
+      <div class="card table-card">
+        <div class="table-wrap"><table class="grid" id="custTable"><thead></thead><tbody></tbody></table></div>
+        <div class="pager" id="custPager"></div>
+      </div>
+    </div>
+
+    <div id="custDetail" class="hidden"></div>
+  </section>
+
+  <!-- ===== شاشة شيكات المخازن (عرض فقط) ===== -->
+  <section id="view-warehouses" class="view hidden">
+    <div class="print-only print-title" id="whPrintTitle"></div>
+    <div class="card filters no-print hidden" id="whIdNotice"></div>
+    <div class="kpis no-print" id="whKpis"></div>
+
+    <div class="card table-card no-print" style="margin-bottom:12px">
+      <div class="table-wrap" style="max-height:300px"><table class="grid" id="whSumTable"><thead></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card filters no-print">
+      <input type="search" id="wSearch" placeholder="بحث: عميل، كود، رقم شيك، بنك، ملاحظات…" autocomplete="off">
+      <select id="wWh" autocomplete="off"><option value="">كل المخازن</option></select>
+      <select id="wState" autocomplete="off"><option value="">كل المواقف (mm)</option></select>
+      <select id="wDue" autocomplete="off">
+        <option value="">مستحق + تحت التحصيل</option>
+        <option value="مستحق">مستحق</option>
+        <option value="تحت التحصيل">تحت التحصيل</option>
+      </select>
+      <label class="inline chk"><input type="checkbox" id="wOpen" autocomplete="off"> غير الخالص فقط</label>
+      <label class="inline chk"><input type="checkbox" id="wUnreg" autocomplete="off"> غير مسجل في شيت الشيكات</label>
+      <button class="btn ghost" id="wReset">مسح</button>
+      <span class="grow"></span>
+      <button class="btn ghost" id="wExport">⬇ تصدير CSV</button>
+      <button class="btn ghost" id="wPrint">🖨 طباعة</button>
+      <button class="btn ghost" id="wImport">📋 إدراج من جدول</button>
+      <button class="btn primary" id="wAdd">＋ إضافة شيك</button>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-wrap"><table class="grid" id="whTable"><thead></thead><tbody></tbody></table></div>
+      <div class="pager" id="whFoot"></div>
+    </div>
+  </section>
+
+  <!-- ===== شاشة شيكات بالخزنة ===== -->
+  <section id="view-treasury" class="view hidden">
+    <div class="print-only print-title" id="trPrintTitle"></div>
+    <div class="kpis no-print" id="trKpis"></div>
+
+    <div class="card filters no-print">
+      <span class="muted small">الحاله:</span>
+      <span id="trStatuses" class="chips-inline"></span>
+      <select id="trWh" autocomplete="off"><option value="">كل المخازن</option></select>
+      <label class="inline">القيمة
+        <select id="trMeasure" autocomplete="off">
+          <option value="net">صافى الشيك</option>
+          <option value="amount">قيمة الشيك</option>
+          <option value="count">عدد الشيكات</option>
+        </select>
+      </label>
+      <label class="inline">الأعمدة
+        <select id="trGrain" autocomplete="off">
+          <option value="month">السنة والشهر</option>
+          <option value="year">السنة فقط</option>
+        </select>
+      </label>
+      <span class="grow"></span>
+      <button class="btn ghost" id="trExport">⬇ تصدير CSV</button>
+      <button class="btn ghost" id="trPrint">🖨 طباعة</button>
+    </div>
+
+    <div class="card table-card">
+      <div class="pivot-head no-print">
+        <h3>إجمالي الشيكات بالمورد المتوقع على شهور وسنين الاستحقاق</h3>
+        <span class="muted small">اضغط على أي رقم لعرض الشيكات بتاعته • الشهور اللي عدّت متعلّمة بلون مختلف</span>
+      </div>
+      <div class="table-wrap pivot-wrap"><table class="grid pivot" id="trPivot"></table></div>
+    </div>
+
+    <div id="trDetail" class="card table-card hidden" style="margin-top:12px">
+      <div class="filters" style="margin:0;border-bottom:1px solid var(--border)">
+        <h3 id="trDetailTitle" style="margin:0;font-size:15px"></h3><span class="grow"></span>
+        <button class="btn ghost" id="trDetailClose">✕ إغلاق</button>
+      </div>
+      <div class="table-wrap"><table class="grid" id="trTable"><thead></thead><tbody></tbody></table></div>
+      <div class="pager" id="trFoot"></div>
+    </div>
+  </section>
+
+  <!-- ===== شاشة متابعة الموردين ===== -->
+  <section id="view-suppliers" class="view hidden">
+    <div class="print-only print-title" id="supPrintTitle"></div>
+    <div class="kpis" id="supKpis"></div>
+
+    <div class="card table-card no-print" style="margin-bottom:12px">
+      <div class="table-wrap" style="max-height:320px"><table class="grid" id="supSumTable"><thead></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card filters no-print">
+      <input type="search" id="sSearch" placeholder="بحث: عميل، رقم شيك، NN، بيان…" autocomplete="off">
+      <select id="sSupplier" autocomplete="off"><option value="">كل الموردين</option></select>
+      <select id="sStatus" autocomplete="off"><option value="">متابعة مورد + امانات لدي المورد</option></select>
+      <select id="sCash" autocomplete="off"><option value="">كل حالات الصرف</option></select>
+      <select id="sDue" autocomplete="off">
+        <option value="">مستحق + تحت التحصيل</option>
+        <option value="مستحق">مستحق</option>
+        <option value="تحت التحصيل">تحت التحصيل</option>
+      </select>
+      <button class="btn ghost" id="sReset">مسح</button>
+      <span class="grow"></span>
+      <button class="btn ghost" id="sPrint">🖨 طباعة كشف</button>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-wrap"><table class="grid" id="supTable"><thead></thead><tbody></tbody></table></div>
+      <div class="pager" id="supFoot"></div>
+    </div>
+  </section>
+</main>
+
+<!-- نموذج إضافة / تعديل -->
+<dialog id="checkDlg" class="dlg">
+  <form id="checkForm" method="dialog">
+    <div class="dlg-head">
+      <h2 id="dlgTitle">إضافة شيك</h2>
+      <button type="button" class="x" data-close>✕</button>
+    </div>
+    <div class="dlg-body" id="formBody"></div>
+    <div class="dlg-foot">
+      <span id="formMsg" class="small"></span>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost hidden" id="histBtn" title="مين عدّل إيه في الشيك ده">🕘 سجل</button>
+      <button type="button" class="btn ghost hidden" id="dupBtn">نسخ كشيك جديد</button>
+      <button type="button" class="btn ghost" data-close>إلغاء</button>
+      <button type="submit" class="btn primary" id="saveBtn">حفظ</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- إضافة / تعديل شيك في شيت شيكات المخازن -->
+<dialog id="whDlg" class="dlg">
+  <form id="whForm" method="dialog">
+    <div class="dlg-head">
+      <h2 id="whDlgTitle">إضافة شيك — شيكات المخازن</h2>
+      <button type="button" class="x" data-close>✕</button>
+    </div>
+    <div class="dlg-body" id="whFormBody"></div>
+    <div class="dlg-foot">
+      <span id="whFormMsg" class="small"></span>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost hidden" id="whHistBtn" title="مين عدّل إيه في الشيك ده">🕘 سجل</button>
+      <button type="button" class="btn ghost hidden" id="whDupBtn">نسخ كشيك جديد</button>
+      <button type="button" class="btn ghost" data-close>إلغاء</button>
+      <button type="submit" class="btn primary" id="whSaveBtn">حفظ</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- إدراج مجموعة شيكات من جدول منسوخ -->
+<dialog id="importDlg" class="dlg wide">
+  <form id="importForm" method="dialog">
+    <div class="dlg-head"><h2>إدراج شيكات من جدول</h2><button type="button" class="x" data-close>✕</button></div>
+    <div class="dlg-body">
+      <p class="muted small" style="margin-top:0">
+        انسخ الصفوف من Excel أو Google Sheets <b>مع صف العناوين</b> والصقها هنا (Ctrl+V).
+        العناوين لازم تكون بنفس أسماء أعمدة الشيت (كود العميل، رقم الشيك، البنك، قيمة الشيك، تاريخ الاستحقاق…)، وترتيبها مش مهم.
+        لو لصقت بدون عناوين، الأعمدة تتقري بنفس ترتيب أعمدة الشيت.
+      </p>
+      <textarea id="impText" class="paste-box" placeholder="الصق الجدول هنا…" spellcheck="false"></textarea>
+      <div class="date-fmt small">
+        <label class="inline">صيغة التاريخ
+          <select id="impDateFmt" autocomplete="off">
+            <option value="auto">تلقائي</option>
+            <option value="dmy">يوم/شهر/سنة (31/12/2026)</option>
+            <option value="mdy">شهر/يوم/سنة (12/31/2026)</option>
+          </select>
+        </label>
+        <span id="impDateInfo"></span>
+      </div>
+      <div id="impMap" class="small"></div>
+      <div id="impSummary" class="kpis hidden" style="margin-top:10px"></div>
+      <div id="impPreviewWrap" class="table-wrap hidden" style="max-height:340px;border:1px solid var(--border);border-radius:8px">
+        <table class="grid" id="impPreview"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span id="impMsg" class="small"></span><span class="grow"></span>
+      <button type="button" class="btn ghost" id="impClear">مسح</button>
+      <button type="button" class="btn ghost" data-close>إلغاء</button>
+      <button type="submit" class="btn primary" id="impSave" disabled>إدراج</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- فلتر الشيت: اختيار عمود وقيمه -->
+<dialog id="colFilterDlg" class="dlg narrow">
+  <form id="colFilterForm" method="dialog">
+    <div class="dlg-head"><h2>فلتر الشيت</h2><button type="button" class="x" data-close>✕</button></div>
+    <div class="dlg-body">
+      <label class="field"><span>العمود</span><select id="cfCol"></select></label>
+      <div class="cf-tools">
+        <input type="search" id="cfSearch" placeholder="بحث في القيم…" autocomplete="off">
+        <button type="button" class="btn ghost" id="cfAll">تحديد الظاهر</button>
+        <button type="button" class="btn ghost" id="cfNone">إلغاء الكل</button>
+      </div>
+      <div id="cfList" class="cf-list"></div>
+      <div id="cfInfo" class="muted small"></div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn ghost" id="cfRemove">إزالة فلتر العمود</button>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" data-close>إلغاء</button>
+      <button type="submit" class="btn primary">تطبيق</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- تعديل جماعي -->
+<dialog id="bulkDlg" class="dlg">
+  <form id="bulkForm" method="dialog">
+    <div class="dlg-head"><h2 id="bulkTitle">تعديل جماعي</h2><button type="button" class="x" data-close>✕</button></div>
+    <div class="dlg-body">
+      <div id="bulkFields"></div>
+      <button type="button" class="btn ghost" id="bulkAddField">＋ عمود آخر</button>
+      <h3 class="small muted" style="margin:14px 0 6px">معاينة التغييرات</h3>
+      <div class="table-wrap" style="max-height:300px;border:1px solid var(--border);border-radius:8px">
+        <table class="grid" id="bulkPreview"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span id="bulkMsg" class="small"></span><span class="grow"></span>
+      <button type="button" class="btn ghost" data-close>إلغاء</button>
+      <button type="submit" class="btn primary" id="bulkSave">حفظ</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- شريط التحديد -->
+<div id="selBar" class="sel-bar hidden">
+  <span id="selInfo"></span>
+  <span class="grow"></span>
+  <button class="btn ghost" id="selClear">إلغاء التحديد</button>
+  <button class="btn primary" id="selEdit">✎ تعديل جماعي</button>
+</div>
+
+<!-- الإعدادات -->
+<dialog id="settingsDlg" class="dlg narrow">
+  <form id="settingsForm" method="dialog">
+    <div class="dlg-head"><h2>الإعدادات</h2><button type="button" class="x" data-close>✕</button></div>
+    <div class="dlg-body">
+      <label class="field req"><span>اسم الموظف</span>
+        <input id="sUser" type="text" maxlength="60" placeholder="مثلاً: أحمد محمد" autocomplete="off" required></label>
+      <p class="muted small" style="margin-top:-4px">كل إضافة أو تعديل بيتسجل باسمك في شيت «سجل التعديلات».</p>
+      <label class="field"><span>رابط Apps Script (Web App URL)</span>
+        <input id="sUrl" type="url" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" required></label>
+      <label class="field"><span>رمز الدخول (نفس SECRET في Code.gs)</span>
+        <input id="sKey" type="password" dir="ltr" required></label>
+      <p class="muted small">الإعدادات تُحفظ في هذا المتصفح فقط. طريقة التجهيز موضحة في ملف README.md.</p>
+      <p class="muted small" id="appVersion"></p>
+    </div>
+    <div class="dlg-foot">
+      <span id="sMsg" class="small"></span><span class="grow"></span>
+      <button type="button" class="btn ghost" data-close>إلغاء</button>
+      <button type="submit" class="btn primary">حفظ واتصال</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- سجل تعديلات شيك (عرض فقط) -->
+<dialog id="histDlg" class="dlg">
+  <div class="dlg-head"><h2 id="histTitle">سجل التعديلات</h2><button type="button" class="x" data-close>✕</button></div>
+  <div class="dlg-body" id="histBody"></div>
+  <div class="dlg-foot"><span class="grow"></span><button type="button" class="btn ghost" data-close>إغلاق</button></div>
+</dialog>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="assets/core.js?v=20261014-r2"></script>
+<script src="assets/bulk.js?v=20261014-r2"></script>
+<script src="assets/checks.js?v=20261014-r2"></script>
+<script src="assets/customers.js?v=20261014-r2"></script>
+<script src="assets/import.js?v=20261014-r2"></script>
+<script src="assets/suppliers.js?v=20261014-r2"></script>
+<script src="assets/treasury.js?v=20261014-r2"></script>
+<script src="assets/warehouses.js?v=20261014-r2"></script>
+</body>
+</html>
