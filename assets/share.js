@@ -24,9 +24,76 @@
     const head = cols.map(c => c[0]);
     const body = rows.map(r => cols.map(c => { const v = c[1](r); return v == null ? '' : String(v).trim(); }));
     const sums = cols.map(c => c[2] && c[2].sum ? rows.reduce((s, r) => s + (Number(c[2].sum(r)) || 0), 0) : null);
-    const parts = [`${rows.length} شيك${sel.length ? ' (المتحدد بس)' : ''}`];
+    const parts = [`${rows.length} ${o.unit || 'شيك'}${sel.length ? ' (المتحدد بس)' : ''}`];
     cols.forEach((c, i) => { if (sums[i] != null) parts.push(`إجمالي ${c[0]}: ${App.fmt(sums[i])}`); });
-    return { title: o.title, sub: parts.join(' — '), head, body, sums, file: o.file || 'checks', numCols: cols.map(c => !!(c[2] && c[2].num)) };
+    // القيم الرقمية الخام (للنسخ كجدول: Excel ياخدها أرقام مش نص)
+    const raw = rows.map(r => cols.map(c => c[2] && c[2].num && c[2].sum ? Number(c[2].sum(r)) || 0 : null));
+    return { title: o.title, sub: parts.join(' — '), head, body, raw, sums, unit: o.unit || 'شيك', file: o.file || 'checks', numCols: cols.map(c => !!(c[2] && c[2].num)) };
+  }
+
+  // ===== النسخ كجدول: HTML (Excel / Google Sheets / Word بيلصقوه جدول) + نص بـ Tab للبرامج التانية =====
+  const clean = v => String(v ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+  const TD = 'border:1px solid #cbd5e1;padding:4px 8px;';
+  const NUM = "mso-number-format:'\\#\\,\\#\\#0\\.00';text-align:left;";
+  function tableHtml(d) {
+    const cell = (v, i, r, tag = 'td', extra = '') => {
+      const isNum = d.numCols[i] && typeof v === 'number';
+      return `<${tag} style="${TD}${isNum ? NUM : ''}${extra}">${isNum ? v : esc(clean(v))}</${tag}>`;
+    };
+    const body = d.body.map((row, j) => `<tr>${row.map((v, i) => cell(d.raw[j][i] ?? v, i, j)).join('')}</tr>`).join('');
+    const total = d.sums.some(s => s != null)
+      ? `<tr>${d.sums.map((s, i) => cell(s != null ? s : (i === 0 ? 'الإجمالي' : ''), i, -1, 'td', 'font-weight:700;background:#dbeafe;')).join('')}</tr>` : '';
+    return `<meta charset="utf-8"><table dir="rtl" style="border-collapse:collapse;font-family:Cairo,Arial,sans-serif;font-size:11pt">
+      <thead><tr>${d.head.map((h, i) => cell(h, -1, -1, 'th', 'font-weight:700;background:#e2e8f0;')).join('')}</tr></thead>
+      <tbody>${body}${total}</tbody></table>`;
+  }
+  function tableTsv(d) {
+    const total = d.sums.some(s => s != null) ? [d.sums.map((s, i) => s != null ? s : (i === 0 ? 'الإجمالي' : ''))] : [];
+    return [d.head, ...d.body.map((row, j) => row.map((v, i) => d.raw[j][i] ?? v)), ...total].map(r => r.map(clean).join('\t')).join('\n');
+  }
+  async function copyRich(html, text) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+      return true;
+    } catch { }
+    // متصفح قديم أو الصفحة مفتوحة من غير https: نحدد جدول مخفي وننسخه
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;top:0;left:-10000px;opacity:0';
+    box.innerHTML = html; document.body.appendChild(box);
+    const range = document.createRange(); range.selectNodeContents(box);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+    let ok = false; try { ok = document.execCommand('copy'); } catch { }
+    s.removeAllRanges(); box.remove();
+    return ok;
+  }
+  const copiedMsg = (ok, n, unit, sel) => ok
+    ? `اتنسخ ${n} ${unit}${sel ? ' (المتحدد بس)' : ''} كجدول ✓ — الصقه في Excel أو Google Sheets أو Word (Ctrl+V)`
+    : '⚠ المتصفح منع النسخ — جرّب تاني أو استخدم «Excel (CSV)» من 📤 مشاركة';
+  async function copyTable(o) {
+    const d = prepare(o);
+    if (!d.body.length) { App.toast('مفيش بيانات في الجدول للنسخ'); return false; }
+    const ok = await copyRich(tableHtml(d), tableTsv(d));
+    App.toast(copiedMsg(ok, d.body.length, d.unit, /المتحدد/.test(d.sub)), ok ? 3500 : 6000);
+    return ok;
+  }
+  // نسخ جدول زي ما هو ظاهر على الشاشة (للجداول الملخصة زي جدول الخزنة)
+  async function copyDom(table, unit = 'صف') {
+    const rows = [...table.querySelectorAll('tr')];
+    const cells = tr => [...tr.cells].filter(td => !td.classList.contains('selc'));
+    const html = `<meta charset="utf-8"><table dir="rtl" style="border-collapse:collapse;font-family:Cairo,Arial,sans-serif;font-size:11pt">${rows.map(tr =>
+      `<tr>${cells(tr).map(td => {
+        const tag = td.tagName === 'TH' ? 'th' : 'td', t = clean(td.innerText), n = App.num(t);
+        const isNum = tag === 'td' && t !== '' && /^-?[\d,.]+$/.test(t);
+        return `<${tag}${td.colSpan > 1 ? ` colspan="${td.colSpan}"` : ''}${td.rowSpan > 1 ? ` rowspan="${td.rowSpan}"` : ''} style="${TD}${tag === 'th' ? 'font-weight:700;background:#e2e8f0;' : ''}${isNum ? NUM : ''}">${isNum ? n : esc(t)}</${tag}>`;
+      }).join('')}</tr>`).join('')}</table>`;
+    const text = rows.map(tr => cells(tr).map(td => clean(td.innerText)).join('\t')).join('\n');
+    // صف «لا توجد شيكات…» مش بيانات: الصفوف اللي فيها بيانات بس هي اللي فيها أكتر من خلية
+    const n = [...table.querySelectorAll('tbody tr')].filter(tr => tr.cells.length > 1).length;
+    if (!n) { App.toast('مفيش بيانات في الجدول للنسخ'); return false; }
+    const ok = await copyRich(html, text);
+    App.toast(copiedMsg(ok, n, unit), ok ? 3500 : 6000);
+    return ok;
   }
 
   function toText(d, maxChars) {
@@ -147,7 +214,7 @@
     catch (e) { if (e.name !== 'AbortError') msg('⚠ ' + e.message, 'err'); }
   }
 
-  App.share = { open };
+  App.share = { open, copyTable, copyDom };
 
   document.addEventListener('DOMContentLoaded', () => {
     $('#shWa').addEventListener('click', () => {
@@ -156,6 +223,10 @@
       if (t.length < cur.text.length) msg('النص اتقص علشان واتساب — ابعت الصورة أو ملف Excel للجدول كامل', 'warn');
     });
     $('#shCopy').addEventListener('click', async () => { const ok = await copy(cur.text); msg(ok ? 'اتنسخ ✓ — الصقه في أي شات' : '⚠ مقدرتش أنسخ — حدد النص وانسخه بإيدك', ok ? 'ok' : 'err'); });
+    $('#shTable').addEventListener('click', async () => {
+      const ok = await copyRich(tableHtml(cur), tableTsv(cur));
+      msg(copiedMsg(ok, cur.body.length, cur.unit, /المتحدد/.test(cur.sub)), ok ? 'ok' : 'err');
+    });
     $('#shImgShare').addEventListener('click', shareImage);
     $('#shImgDl').addEventListener('click', () => cur.blob && download(cur.blob, fname('png')));
     $('#shCsv').addEventListener('click', () => download(new Blob([toCsv(cur)], { type: 'text/csv;charset=utf-8' }), fname('csv')));

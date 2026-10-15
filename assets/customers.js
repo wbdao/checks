@@ -234,6 +234,7 @@
           <div class="section-title"><h3>شيكات العميل</h3></div><span class="grow"></span>
           <select id="dSrc" autocomplete="off"><option value="">الشيتين</option><option value="main">شيت الشيكات</option><option value="wh">شيت المخازن</option></select>
           <label class="inline chk"><input type="checkbox" id="dOpenOnly" ${c.open ? 'checked' : ''}> غير الخالص فقط</label>
+          <button type="button" class="btn ghost" id="dCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
           <button type="button" class="btn ghost" id="dShare">📤 مشاركة</button>
         </div>
         <div class="table-wrap"><table class="grid" id="dTable"><thead><tr>
@@ -260,14 +261,16 @@
     };
     drawTable();
     $('#dOpenOnly').addEventListener('change', drawTable);
-    $('#dShare').addEventListener('click', () => App.share.open({
+    const shareCfg = () => ({
       title: `شيكات العميل: ${c.name} (${c.code})`, file: 'customer-' + c.code, rows: shown,
       cols: [
         ['الشيت', r => r.src ? 'المخازن' : 'الشيكات'], ['NN / WH', r => r.id], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
         ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo], ['الصافي', r => App.fmt(r.netN), { sum: r => r.netN, num: true }],
         ['الحاله', r => r.status || (r.ref && r.ref.state) || ''], ['موقف الشيك', r => r.position],
       ],
-    }));
+    });
+    $('#dShare').addEventListener('click', () => App.share.open(shareCfg()));
+    $('#dCopy').addEventListener('click', () => App.share.copyTable(shareCfg()));
     $('#dSrc').addEventListener('change', drawTable);
     $('#dTable tbody').addEventListener('click', e => {
       const tr = e.target.closest('tr'), id = tr?.dataset.id; if (!id) return;
@@ -341,6 +344,19 @@
       $('#cSearch').addEventListener('input', App.debounce(re));
       $('#cWh').addEventListener('change', re);
       $('#cCommit').addEventListener('change', re);
+      // نسخ جدول العملاء (كل النتايج بعد الفلتر، مش الصفحة الظاهرة بس)
+      $('#cCopy').addEventListener('click', () => App.share.copyTable({
+        title: 'تحليل العملاء', unit: 'عميل', rows,
+        cols: [
+          ['الكود', c => c.code], ['العميل', c => c.name], ['المخزن', c => c.wh], ['عدد الشيكات', c => c.count],
+          ['إجمالي الشيكات', c => App.fmt(c.total), { sum: c => c.total, num: true }],
+          ['الرصيد المفتوح', c => App.fmt(c.open), { sum: c => c.open, num: true }],
+          ['متأخر', c => App.fmt(c.overdue), { sum: c => c.overdue, num: true }],
+          ['الالتزام بالسداد', c => c.commit.pct == null ? 'لا يوجد مستحق' : `${c.commit.label} ${c.commit.pct}%`],
+          ['أقصى تأخير (يوم)', c => c.commit.maxLate || ''], ['مرفوض', c => c.rejected || ''],
+          ['متوسط الأجل (يوم)', c => c.avgDays ?? ''], ['آخر استلام', c => App.iso(c.lastRecv)],
+        ],
+      }));
       $('#cOpenOnly').addEventListener('change', re);
       $('#custTable thead').addEventListener('click', e => {
         const k = e.target.closest('th')?.dataset.k; if (!k) return;

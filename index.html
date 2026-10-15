@@ -7,7 +7,7 @@
 <title>إدارة الشيكات</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="assets/style.css?v=20261015-c3">
+<link rel="stylesheet" href="assets/style.css?v=20261015-c4">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -50,6 +50,7 @@
       <button class="btn ghost" id="colFilterBtn" title="فلترة أي عمود من أعمدة الشيت">⏷ فلتر الشيت</button>
       <button class="btn ghost" id="fReset">مسح</button>
       <span class="grow"></span>
+      <button class="btn ghost" id="copyBtn" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
       <button class="btn ghost" id="shareBtn">📤 مشاركة</button>
       <button class="btn ghost" id="exportBtn">⬇ تصدير CSV</button>
       <button class="btn ghost" id="importBtn">📋 إدراج من جدول</button>
@@ -81,6 +82,8 @@
         <select id="cWh" autocomplete="off"><option value="">كل المخازن</option></select>
         <select id="cCommit" autocomplete="off" title="الالتزام بالسداد في مواعيد الشيكات"><option value="">كل درجات الالتزام</option><option>ممتاز</option><option>جيد</option><option>متوسط</option><option>ضعيف</option><option value="none">لا يوجد مستحق</option></select>
         <label class="inline chk"><input type="checkbox" id="cOpenOnly" autocomplete="off" checked> عملاء لديهم رصيد مفتوح فقط</label>
+        <span class="grow"></span>
+        <button class="btn ghost" id="cCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
       </div>
       <div class="card table-card">
         <div class="table-wrap"><table class="grid" id="custTable"><thead></thead><tbody></tbody></table></div>
@@ -115,6 +118,7 @@
       <button class="btn ghost" id="wReset">مسح</button>
       <span class="grow"></span>
       <button class="btn ghost" id="wExport">⬇ تصدير CSV</button>
+      <button class="btn ghost" id="wCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
       <button class="btn ghost" id="wShare">📤 مشاركة</button>
       <button class="btn ghost" id="wPrint">🖨 طباعة</button>
       <button class="btn ghost" id="wImport">📋 إدراج من جدول</button>
@@ -158,6 +162,7 @@
       <div class="pivot-head no-print">
         <h3>إجمالي الشيكات بالمورد المتوقع على شهور وسنين الاستحقاق</h3>
         <span class="muted small">اضغط على أي رقم لعرض الشيكات بتاعته • الشهور اللي عدّت متعلّمة بلون مختلف</span>
+        <button class="btn ghost" id="trPivotCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
       </div>
       <div class="table-wrap pivot-wrap"><table class="grid pivot" id="trPivot"></table></div>
     </div>
@@ -165,6 +170,7 @@
     <div id="trDetail" class="card table-card hidden" style="margin-top:12px">
       <div class="filters" style="margin:0;border-bottom:1px solid var(--border)">
         <h3 id="trDetailTitle" style="margin:0;font-size:15px"></h3><span class="grow"></span>
+        <button class="btn ghost" id="trCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
         <button class="btn ghost" id="trShare">📤 مشاركة</button>
         <button class="btn ghost" id="trDetailClose">✕ إغلاق</button>
       </div>
@@ -194,6 +200,7 @@
       </select>
       <button class="btn ghost" id="sReset">مسح</button>
       <span class="grow"></span>
+      <button class="btn ghost" id="sCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
       <button class="btn ghost" id="sShare">📤 مشاركة</button>
       <button class="btn ghost" id="sPrint">🖨 طباعة كشف</button>
     </div>
@@ -339,6 +346,7 @@
       <div class="share-actions">
         <button type="button" class="btn share-wa" id="shWa">🟢 واتساب (نص)</button>
         <button type="button" class="btn" id="shCopy">📋 نسخ كنص</button>
+        <button type="button" class="btn" id="shTable">📋 نسخ كجدول</button>
         <button type="button" class="btn primary hidden" id="shImgShare">🖼 مشاركة كصورة</button>
         <button type="button" class="btn" id="shImgDl">⬇ تحميل الصورة</button>
         <button type="button" class="btn" id="shCsv">📊 Excel (CSV)</button>
@@ -386,14 +394,14 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="assets/core.js?v=20261015-c3"></script>
-<script src="assets/share.js?v=20261015-c3"></script>
-<script src="assets/bulk.js?v=20261015-c3"></script>
-<script src="assets/checks.js?v=20261015-c3"></script>
-<script src="assets/customers.js?v=20261015-c3"></script>
-<script src="assets/import.js?v=20261015-c3"></script>
-<script src="assets/suppliers.js?v=20261015-c3"></script>
-<script src="assets/treasury.js?v=20261015-c3"></script>
-<script src="assets/warehouses.js?v=20261015-c3"></script>
+<script src="assets/core.js?v=20261015-c4"></script>
+<script src="assets/share.js?v=20261015-c4"></script>
+<script src="assets/bulk.js?v=20261015-c4"></script>
+<script src="assets/checks.js?v=20261015-c4"></script>
+<script src="assets/customers.js?v=20261015-c4"></script>
+<script src="assets/import.js?v=20261015-c4"></script>
+<script src="assets/suppliers.js?v=20261015-c4"></script>
+<script src="assets/treasury.js?v=20261015-c4"></script>
+<script src="assets/warehouses.js?v=20261015-c4"></script>
 </body>
 </html>

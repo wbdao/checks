@@ -195,14 +195,16 @@
         const c = e.target.closest('.chip'); if (c) cfOpen(c.dataset.k);
       });
       $('#exportBtn').addEventListener('click', exportCsv);
-      $('#shareBtn').addEventListener('click', () => App.share.open({
+      const shareCfg = () => ({
         title: 'الشيكات', file: 'checks', rows: filtered,
         cols: [
         ['NN', r => r.id], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
         ['صافى الشيك', r => App.fmt(r.netN), { sum: r => r.netN, num: true }], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
         ['الحاله', r => r.status], ['موقف الشيك', r => r.position], ['حالة الصرف', r => r.cashState],
         ],
-      }));
+      });
+      $('#shareBtn').addEventListener('click', () => App.share.open(shareCfg()));
+      $('#copyBtn').addEventListener('click', () => App.share.copyTable(shareCfg()));
     },
     // يُستخدم من شاشة العملاء لفتح الشيكات بفلتر عميل
     showCustomer(code) { $('#fSearch').value = code; location.hash = '#checks'; },
