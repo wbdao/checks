@@ -23,24 +23,52 @@
   const moneyTip = { callbacks: { label: ctx => `${ctx.dataset.label ? ctx.dataset.label + ': ' : ''}${App.fmt(ctx.parsed.x ?? ctx.parsed.y ?? ctx.parsed)}` } };
   const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const sum = a => a.reduce((s, r) => s + r.netN, 0);
+  const isOpen = r => !r.isPaid && !r.isReturned;
   const mode = arr => { const m = new Map(); arr.forEach(v => v && m.set(v, (m.get(v) || 0) + 1)); return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ''; };
 
+  // ===== الشيكات من الشيتين =====
+  // شيت الشيكات + شيت المخازن. الشيك اللي موجود في الاتنين (نفس كود العميل ونفس رقم الشيك) بيتحسب مرة واحدة
+  // من شيت الشيكات، وبيتكتب جنبه كود WH بتاعه
+  const WH = () => App.views.warehouses && App.views.warehouses.shared;
+  let inWh = new Map();   // «كود|رقم الشيك» في شيت الشيكات ← شيك المخازن المطابق
+  function allRecs() {
+    const main = App.state.records, w = WH();
+    inWh = new Map();
+    if (!w || w.state() !== 'ready') return main;
+    const keys = new Set(main.filter(r => r.code && r.checkNo).map(r => r.code + '|' + r.checkNo));
+    const extra = [];
+    for (const x of w.records()) {
+      if (!x.code) continue;
+      const k = x.code + '|' + x.checkNo;
+      if (x.checkNo && keys.has(k)) { if (!inWh.has(k)) inWh.set(k, x); continue; }
+      const open = w.isOpen(x);
+      extra.push({
+        src: 'wh', ref: x, id: x.whId || 'صف ' + x._rowNum, code: x.code, name: x.name,
+        wh: w.whName(x.wh) || x.wh, bank: x.bank, checkNo: x.checkNo, due: x.due, dueD: x.dueD, recvD: x.recvD,
+        dueState: x.dueState, netN: open ? x.netN : x.amountN,   // المفتوح بالمتبقي، والخالص/المردود بقيمته
+        isPaid: w.isPaid(x), isReturned: w.isReturned(x), isRejected: false,
+        cashState: 'مخازن: ' + (x.state || '—'), position: '', note: x.notes.join(' • '),
+      });
+    }
+    return main.concat(extra);
+  }
+
   // ===== التجميع لكل عميل =====
-  function aggregate() {
+  function aggregate(recs) {
     const t = App.today(), soon = new Date(t); soon.setDate(soon.getDate() + 30);
     const by = new Map();
-    for (const r of App.state.records) {
+    for (const r of recs) {
       if (!r.code) continue;
       if (!by.has(r.code)) by.set(r.code, []);
       by.get(r.code).push(r);
     }
     const out = [];
     for (const [code, list] of by) {
-      const open = list.filter(r => !r.isPaid);
+      const open = list.filter(isOpen);
       const tenors = list.filter(r => r.dueD && r.recvD).map(r => (r.dueD - r.recvD) / 864e5).filter(d => d >= 0 && d < 2000);
       out.push({
         code, name: App.customers.get(code)?.name || list[0].name, wh: mode(list.map(r => r.wh)), list,
-        count: list.length, total: sum(list), paid: sum(list.filter(r => r.isPaid)),
+        count: list.length, whCount: list.filter(r => r.src === 'wh').length, total: sum(list), paid: sum(list.filter(r => r.isPaid)),
         open: sum(open), openCount: open.length,
         overdue: sum(open.filter(r => r.dueD && r.dueD <= t)), overdueCount: open.filter(r => r.dueD && r.dueD <= t).length,
         upcoming: sum(open.filter(r => r.dueD && r.dueD > t && r.dueD <= soon)),
@@ -67,9 +95,9 @@
     { k: 'lastRecv', t: 'آخر استلام', v: c => `<span class="num">${App.iso(c.lastRecv)}</span>` },
   ];
 
-  function overview(all) {
+  function overview(all, recs) {
     const t = App.today();
-    const recs = App.state.records, open = recs.filter(r => !r.isPaid);
+    const open = recs.filter(isOpen);
     const overdue = open.filter(r => r.dueD && r.dueD <= t);
     const soon = new Date(t); soon.setDate(soon.getDate() + 30);
     const upcoming = open.filter(r => r.dueD && r.dueD > t && r.dueD <= soon);
@@ -144,7 +172,7 @@
         <button class="btn primary" id="dAdd">＋ شيك لهذا العميل</button>
       </div>
       <div class="kpis">${[
-        ['إجمالي الشيكات', App.fmt(c.total), `${c.count} شيك`, ''],
+        ['إجمالي الشيكات', App.fmt(c.total), `${c.count} شيك${c.whCount ? ` — منهم ${c.whCount} من شيت المخازن` : ''}`, ''],
         ['تم تحصيله (خالص)', App.fmt(c.paid), `نسبة التحصيل ${payRate}%`, 'ok'],
         ['الرصيد المفتوح', App.fmt(c.open), `${c.openCount} شيك`, c.open ? 'warn' : 'ok'],
         ['متأخر', App.fmt(c.overdue), `${c.overdueCount} شيك`, c.overdue ? 'bad' : ''],
@@ -160,27 +188,36 @@
       <div class="card table-card">
         <div class="filters" style="margin:0;border-bottom:1px solid var(--border)">
           <div class="section-title"><h3>شيكات العميل</h3></div><span class="grow"></span>
+          <select id="dSrc" autocomplete="off"><option value="">الشيتين</option><option value="main">شيت الشيكات</option><option value="wh">شيت المخازن</option></select>
           <label class="inline chk"><input type="checkbox" id="dOpenOnly" ${c.open ? 'checked' : ''}> غير الخالص فقط</label>
         </div>
         <div class="table-wrap"><table class="grid" id="dTable"><thead><tr>
-          <th>NN</th><th>الاستحقاق</th><th>البنك / رقم الشيك</th><th>الصافي</th><th>حالة الصرف</th><th>الحاله</th><th>موقف الشيك</th><th>بيان</th>
+          <th>الشيت</th><th>NN / WH</th><th>الاستحقاق</th><th>البنك / رقم الشيك</th><th>الصافي</th><th>حالة الصرف</th><th>الحاله</th><th>موقف الشيك</th><th>بيان</th>
         </tr></thead><tbody></tbody></table></div>
       </div>`;
 
+    const w = WH();
     const drawTable = () => {
-      const only = $('#dOpenOnly').checked;
-      const list = c.list.filter(r => !only || !r.isPaid).sort((a, b) => (b.dueD || 0) - (a.dueD || 0));
-      $('#dTable tbody').innerHTML = list.map(r => `<tr data-id="${esc(r.id)}">
-        <td>${esc(r.id)}</td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span><span class="sub">${esc(r.dueState)}</span></td>
+      const only = $('#dOpenOnly').checked, src = $('#dSrc').value;
+      const list = c.list.filter(r => (!only || isOpen(r)) && (!src || (r.src || 'main') === src)).sort((a, b) => (b.dueD || 0) - (a.dueD || 0));
+      $('#dTable tbody').innerHTML = list.map(r => {
+        const twin = r.src ? null : inWh.get(r.code + '|' + r.checkNo);
+        return `<tr data-id="${esc(r.id)}" data-src="${r.src || 'main'}">
+        <td>${r.src ? '<span class="badge info">المخازن</span>' : '<span class="badge">الشيكات</span>'}</td>
+        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span><span class="sub">${esc(r.dueState)}</span></td>
         <td>${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span></td><td><b class="num">${App.fmt(r.netN)}</b></td>
-        <td>${App.cashBadge(r)}</td><td>${App.statusBadge(r)}</td><td>${esc(r.position)}</td>
-        <td class="wrap small">${esc(String(r.note || '').slice(0, 90))}</td></tr>`).join('')
-        || '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">لا توجد شيكات غير خالصة</td></tr>';
+        <td>${r.src ? w.stateBadge(r.ref) : App.cashBadge(r)}</td><td>${r.src ? '' : App.statusBadge(r)}</td><td>${esc(r.position)}</td>
+        <td class="wrap small">${esc(String(r.note || '').slice(0, 90))}</td></tr>`;
+      }).join('')
+        || '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">لا توجد شيكات</td></tr>';
     };
     drawTable();
     $('#dOpenOnly').addEventListener('change', drawTable);
+    $('#dSrc').addEventListener('change', drawTable);
     $('#dTable tbody').addEventListener('click', e => {
-      const id = e.target.closest('tr')?.dataset.id; if (id) App.openForm(App.state.records.find(r => r.id === id));
+      const tr = e.target.closest('tr'), id = tr?.dataset.id; if (!id) return;
+      if (tr.dataset.src === 'wh') { const r = c.list.find(x => x.src === 'wh' && x.id === id); if (r) w.openForm(r.ref); }
+      else App.openForm(App.state.records.find(r => r.id === id));
     });
     $('#dAdd').addEventListener('click', () => {
       const cu = App.customers.get(c.code) || {};
@@ -200,7 +237,7 @@
       }
       const paid = keys.map(() => 0), openOver = keys.map(() => 0), openFut = keys.map(() => 0);
       dated.forEach(r => {
-        const i = keys.indexOf(monthKey(r.dueD)); if (i < 0) return;
+        const i = keys.indexOf(monthKey(r.dueD)); if (i < 0 || r.isReturned) return;
         if (r.isPaid) paid[i] += r.netN; else if (r.dueD <= t) openOver[i] += r.netN; else openFut[i] += r.netN;
       });
       chart('chCustMonthly', {
@@ -230,33 +267,34 @@
   }
 
   function render() {
-    const all = aggregate();
+    WH()?.ensure();   // شيت المخازن بيتحمّل في الخلفية، ولما يخلص الشاشة بتترسم تاني بيه
+    const recs = allRecs(), all = aggregate(recs);
     const code = decodeURIComponent(location.hash.split('/')[1] || '');
     const c = code && all.find(x => x.code === code);
     $('#custOverview').classList.toggle('hidden', !!c);
     $('#custDetail').classList.toggle('hidden', !c);
     if (c) { detail(c); window.scrollTo(0, 0); return; }
     App.fillSelect($('#cWh'), App.lists.wh);
-    overview(all);
+    overview(all, recs);
     table(all);
   }
 
   App.views.customers = {
     render,
     init() {
-      const re = () => { page = 0; table(aggregate()); };
+      const re = () => { page = 0; table(aggregate(allRecs())); };
       $('#cSearch').addEventListener('input', App.debounce(re));
       $('#cWh').addEventListener('change', re);
       $('#cOpenOnly').addEventListener('change', re);
       $('#custTable thead').addEventListener('click', e => {
         const k = e.target.closest('th')?.dataset.k; if (!k) return;
         if (k === sortKey) sortAsc = !sortAsc; else { sortKey = k; sortAsc = ['code', 'name', 'wh'].includes(k); }
-        table(aggregate());
+        table(aggregate(allRecs()));
       });
       $('#custTable tbody').addEventListener('click', e => {
         const code = e.target.closest('tr')?.dataset.code; if (code) location.hash = '#customers/' + encodeURIComponent(code);
       });
-      $('#custPager').addEventListener('click', e => { const d = +e.target.dataset.p; if (d) { page += d; table(aggregate()); } });
+      $('#custPager').addEventListener('click', e => { const d = +e.target.dataset.p; if (d) { page += d; table(aggregate(allRecs())); } });
     },
   };
 })();

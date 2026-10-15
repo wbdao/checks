@@ -63,12 +63,13 @@
       raw = await App.api('listWh');
       App.state.wh = true;
       App.setStatus('');
-      render();
+      refresh();
     } catch (e) {
+      App.state.wh = false;   // فشل — شاشة العملاء ما تعيدش المحاولة لحد ⟳ تحديث
       App.setStatus('⚠ ' + esc(/listWh/.test(e.message)
-        ? 'كود Apps Script المنشور قديم — الصق Code.gs الجديد وانشر «إصدار جديد» علشان صفحة شيكات المخازن تشتغل'
-        : e.message), true);
-      App.statusOwner = 'warehouses';
+        ? 'كود Apps Script المنشور قديم — الصق Code.gs الجديد وانشر «إصدار جديد» علشان شيت شيكات المخازن يتقري'
+        : 'شيت شيكات المخازن: ' + e.message), true);
+      App.statusOwner = App.currentView();
     } finally {
       loading = false;
     }
@@ -184,10 +185,13 @@
     }
   }
 
+  function prepare() { buildWhNames(); records = toRecords(raw); }
+  // بعد التحميل أو الحفظ: لو الشاشة المفتوحة مش شاشة المخازن (زي تحليل العملاء) نحدّثها هي
+  const refresh = () => { if (App.currentView() === 'warehouses') render(); else { prepare(); App.render(); } };
+
   function render() {
     if (!App.state.wh) { load(); return; }
-    buildWhNames();
-    records = toRecords(raw);
+    prepare();
     diagnose();
     const states = [...new Set(records.map(r => r.state).filter(Boolean))];
     App.fillSelect($('#wState'), states);
@@ -330,7 +334,7 @@
       applyResult(res);
       $('#whDlg').close();
       App.toast(editing ? `تم حفظ التعديل (صف ${res.rowNums[0]}) ✓` : `تمت إضافة الشيك في صف ${res.rowNums[0]} ✓`);
-      render();
+      refresh();
     } catch (e) {
       msg.textContent = /whAdd|whUpdate/.test(e.message)
         ? '⚠ كود Apps Script المنشور قديم — الصق Code.gs الجديد وانشر «إصدار جديد»'
@@ -418,6 +422,14 @@
 
   App.views.warehouses = {
     render,
+    // لشاشة تحليل العملاء: شيكات المخازن جاهزة للقراءة + فتح نافذة التعديل
+    shared: {
+      state: () => App.state.wh === true ? 'ready' : App.state.wh === false ? 'failed' : 'loading',
+      ensure: () => { if (App.state.wh == null) load(); },
+      records: () => records,
+      whName: code => whName.get(code) || '',
+      isPaid, isReturned, isOpen, stateBadge, openForm,
+    },
     init() {
       const re = () => { summary(records); table(records); };
       $('#wSearch').addEventListener('input', App.debounce(re));
