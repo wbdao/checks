@@ -68,7 +68,7 @@
       App.state.wh = false;   // فشل — شاشة العملاء ما تعيدش المحاولة لحد ⟳ تحديث
       App.setStatus('⚠ ' + esc(/listWh/.test(e.message)
         ? 'كود Apps Script المنشور قديم — الصق Code.gs الجديد وانشر «إصدار جديد» علشان شيت شيكات المخازن يتقري'
-        : 'شيت شيكات المخازن: ' + e.message), true);
+        : 'شيت شيكات المخازن: ' + e.message) + ' <button type="button" class="btn" data-retry="wh">⟳ حاول تاني</button>', true);
       App.statusOwner = App.currentView();
     } finally {
       loading = false;

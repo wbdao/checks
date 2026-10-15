@@ -54,6 +54,16 @@ const WRITE_ACTIONS = {
 };
 const NEW_CHECK = '(شيك جديد)';
 const NEW_SUMMARY = ['كود العميل', 'اسم العميل سيستم', 'اسم العميل', 'رقم الشيك', 'البنك', 'قيمة الشيك', 'تاريخ الاستحقاق'];
+// منع التكرار: كل طلب كتابة من الموقع معاه rid (رقم مميز). لو نفس الـ rid رجع تاني خلال 6 ساعات
+// (النت فصل والموظف داس حفظ تاني) بيرجع نفس النتيجة القديمة من غير ما يكتب تاني
+const RID_TTL = 6 * 60 * 60;           // بالثواني (أقصى مدة في CacheService)
+const RID_MAX_CHARS = 90000;            // القيمة في الكاش حدها 100KB — لو النتيجة أكبر بنحفظ «اعمل تحديث» بس
+
+// النسخ الاحتياطي اليومي: شغّل setupDailyBackup مرة واحدة من محرر Apps Script
+const BACKUP_FOLDER = 'نسخ احتياطية - شيت الشيكات';
+const BACKUP_KEEP = 30;                 // أقدم من كده بتروح سلة المهملات في Drive (مش بتتمسح نهائي)
+const BACKUP_HOUR = 2;                  // الساعة 2 بالليل
+
 let AUDIT_ = null;   // صفوف السجل للطلب الحالي: [شيت, كود, عمود, قديم, جديد] — بتتكتب مرة واحدة في آخر الطلب
 
 // منطقة الشيت الزمنية (مش منطقة مشروع Apps Script) علشان التواريخ ما تتزحزحش يوم
@@ -79,6 +89,7 @@ function doPost(e) {
     else if (req.action === 'whAdd') out = withLock_(req, () => whAdd_(req.records));
     else if (req.action === 'whUpdate') out = withLock_(req, () => whUpdate_(req.updates));
     else if (req.action === 'whFillIds') out = withLock_(req, () => whFillIds_());
+    else if (req.action === 'backupInfo') out = backupInfo_();
     else throw new Error('إجراء غير معروف: ' + req.action);
     out.ok = true;
   } catch (err) {
@@ -506,16 +517,81 @@ function colLetter_(n) {
 // بيتسجل اللي اتكتب فعلاً. لو السجل نفسه فشل، التعديل مايرجعش كخطأ (علشان محدش يعيده مرتين)
 function withLock_(req, fn) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  if (!lock.tryLock(30000)) throw new Error('الشيت مشغول بتعديل تاني دلوقتي — استنى ثواني وحاول تاني (ما اتحفظش حاجة)');
   AUDIT_ = [];
   try {
+    // نفس الطلب وصل قبل كده؟ نرجّع نتيجته من غير ما نكتب تاني
+    const rid = String(req.rid || '').slice(0, 100);
+    const cache = rid ? CacheService.getScriptCache() : null;
+    const key = 'rid:' + rid;
+    if (cache) {
+      const hit = cache.get(key);
+      if (hit) { const prev = JSON.parse(hit); prev.duplicate = true; return prev; }
+    }
     let out, err = null, logErr = '';
     try { out = fn(); } catch (e) { err = e; }
     try { flushAudit_(req); } catch (e) { logErr = String(e.message || e); }
     if (err) throw err;
     if (logErr) out.auditError = logErr;
+    if (cache) {
+      try {
+        let txt = JSON.stringify(out);
+        if (txt.length > RID_MAX_CHARS) txt = JSON.stringify({ reload: true });
+        cache.put(key, txt, RID_TTL);
+      } catch (e) { /* الكاش اختياري — الكتابة نفسها تمت */ }
+    }
     return out;
   } finally { AUDIT_ = null; lock.releaseLock(); }
+}
+
+// ===== النسخ الاحتياطي =====
+function backupFolder_(create) {
+  const it = DriveApp.getFoldersByName(BACKUP_FOLDER);
+  if (it.hasNext()) return it.next();
+  return create ? DriveApp.createFolder(BACKUP_FOLDER) : null;
+}
+function backupPrefix_() { return SpreadsheetApp.getActive().getName() + ' — نسخة '; }
+function backupFiles_(folder) {
+  const files = [], prefix = backupPrefix_();
+  const it = folder.getFiles();
+  while (it.hasNext()) { const f = it.next(); if (!f.isTrashed() && f.getName().indexOf(prefix) === 0) files.push(f); }
+  return files.sort((a, b) => b.getDateCreated() - a.getDateCreated());   // الأحدث الأول
+}
+
+// نسخة من الملف كله (كل الشيتات) في فولدر النسخ، ونحتفظ بآخر BACKUP_KEEP نسخة
+function dailyBackup() {
+  const ss = SpreadsheetApp.getActive();
+  const folder = backupFolder_(true);
+  const name = backupPrefix_() + Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH-mm');
+  DriveApp.getFileById(ss.getId()).makeCopy(name, folder);
+  const files = backupFiles_(folder);
+  files.slice(BACKUP_KEEP).forEach(f => f.setTrashed(true));
+  return { name: name, kept: Math.min(files.length, BACKUP_KEEP), trashed: Math.max(0, files.length - BACKUP_KEEP) };
+}
+
+// شغّلها مرة واحدة من المحرر (اختار setupDailyBackup ← Run): بتطلب صلاحية Drive، وبتعمل نسخة دلوقتي، وتجدول نسخة كل يوم
+function setupDailyBackup() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'dailyBackup')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('dailyBackup').timeBased().everyDays(1).atHour(BACKUP_HOUR).create();
+  const r = dailyBackup();
+  Logger.log('تم: نسخة احتياطية دلوقتي (%s) + نسخة كل يوم الساعة %s', r.name, BACKUP_HOUR);
+  return r;
+}
+
+// للموقع: حالة النسخ الاحتياطي (قراءة بس)
+function backupInfo_() {
+  const tz = tz_();
+  const scheduled = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'dailyBackup');
+  const folder = backupFolder_(false);
+  const files = folder ? backupFiles_(folder) : [];
+  return {
+    scheduled: scheduled,
+    count: files.length,
+    last: files.length ? Utilities.formatDate(files[0].getDateCreated(), tz, 'yyyy-MM-dd HH:mm') : '',
+    folderUrl: folder ? folder.getUrl() : '',
+  };
 }
 
 // ===== سجل التعديلات =====

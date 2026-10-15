@@ -49,7 +49,7 @@
   ];
 
   const App = window.App = {
-    VERSION: '2026-10-15 — مشاركة الجدول',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
+    VERSION: '2026-10-15 — تحسينات الاتصال',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
     F, PAID_STATUS, REJECTED,
     state: { headers: [], rows: [], records: [], lists: {}, loaded: false, loadedAt: null },
     views: {},
@@ -110,16 +110,60 @@
   // ===== الاتصال =====
   // إجراءات الكتابة — بتتسجل في «سجل التعديلات» باسم الموظف، فمن غير اسم مش هتتبعت
   const WRITES = ['add', 'addMany', 'update', 'updateMany', 'whAdd', 'whUpdate', 'whFillIds'];
+  // مهلة كل طلب (بالمللي ثانية) — قراءة الشيت كله ممكن تاخد وقت أول مرة
+  const TIMEOUTS = { list: 120e3, listWh: 90e3, history: 60e3, backupInfo: 30e3 };
+  const WRITE_TIMEOUT = 90e3;
+  // طلب كتابة ما وصلش رده (النت فصل/المهلة خلصت) بيحتفظ برقمه المميز: لو اتبعت تاني بنفس البيانات
+  // السيرفر بيعرف إنه نفس الطلب وما بيكتبش مرتين
+  const pendingRid = new Map();
+  const newRid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+
+  function netError(e, write, ms) {
+    const again = write ? ' — اضغط «حفظ» تاني بنفس البيانات، ولو كان اتحفظ مش هيتكرر' : ' — اضغط «حاول تاني»';
+    if (e && e.name === 'AbortError') return `الشيت ما ردّش خلال ${Math.round(ms / 1000)} ثانية (النت بطيء أو Google مشغول)${write ? '. مش متأكد إن الحفظ تم' : ''}${again}`;
+    if (!navigator.onLine) return 'مفيش اتصال بالإنترنت' + (write ? ' — التعديل ما اتبعتش. اضغط «حفظ» تاني لما النت يرجع' : '');
+    return 'مقدرتش أوصل لـ Apps Script — اتأكد من النت ومن الرابط في ⚙ الإعدادات' + again;
+  }
+  function httpError(status) {
+    if (status === 429) return 'Google بيقول فيه طلبات كتير — استنى دقيقة وحاول تاني';
+    if (status === 404) return 'رابط Apps Script غلط أو النشر اتشال — راجع الرابط في ⚙ الإعدادات';
+    if (status >= 500) return `Google مشغول دلوقتي (${status}) — حاول تاني بعد شوية`;
+    return 'خطأ في الاتصال: ' + status;
+  }
+
   App.api = async (action, payload = {}) => {
     const { url, key, user } = App.settings();
     if (!url) throw new Error('لم يتم ضبط رابط Apps Script — افتح الإعدادات');
-    if (WRITES.includes(action) && !user) throw new Error('اكتب اسمك في ⚙ الإعدادات (اسم الموظف) الأول — علشان التعديل يتسجل باسمك');
-    // text/plain لتجنب طلب preflight مع Apps Script
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, key, user, ...payload }) });
-    if (!res.ok) throw new Error('خطأ في الاتصال: ' + res.status);
+    const write = WRITES.includes(action);
+    if (write && !user) throw new Error('اكتب اسمك في ⚙ الإعدادات (اسم الموظف) الأول — علشان التعديل يتسجل باسمك');
+    let rid, sig;
+    if (write) { sig = action + '|' + JSON.stringify(payload); rid = pendingRid.get(sig) || newRid(); pendingRid.set(sig, rid); }
+    const ms = TIMEOUTS[action] || WRITE_TIMEOUT;
+    const ctrl = window.AbortController ? new AbortController() : null;
+    const timer = ctrl && setTimeout(() => ctrl.abort(), ms);
+    let res;
+    try {
+      // text/plain لتجنب طلب preflight مع Apps Script
+      res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, key, user, rid, ...payload }), signal: ctrl ? ctrl.signal : undefined });
+    } catch (e) {
+      throw new Error(netError(e, write, ms));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (!res.ok) throw new Error(httpError(res.status));
     let data;
     try { data = await res.json(); } catch { throw new Error('رد غير متوقع من Apps Script — تأكد من النشر بصلاحية Anyone'); }
+    if (write) pendingRid.delete(sig);   // وصل رد أكيد (نجاح أو رفض) — المرة الجاية طلب جديد
     if (!data.ok) throw new Error(data.error || 'خطأ غير معروف');
+    if (data.duplicate) {
+      if (data.reload) {   // النتيجة القديمة كانت كبيرة على الكاش — نحمّل البيانات من جديد
+        setTimeout(() => App.load(), 0);
+        throw new Error('✓ الطلب ده كان اتحفظ قبل كده (ومتكررش) — بحدّث البيانات دلوقتي');
+      }
+      setTimeout(() => App.toast('✓ الطلب ده كان اتحفظ قبل كده — ما اتكررش', 4000), 400);
+    }
     if (data.auditError) setTimeout(() => App.toast('⚠ التعديل اتحفظ، بس ما اتسجلش في «سجل التعديلات»: ' + data.auditError, 6000), 50);
     return data;
   };
@@ -188,7 +232,7 @@
       $('#syncInfo').textContent = `${App.state.records.length.toLocaleString('en-US')} شيك • آخر تحديث ${App.state.loadedAt.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`;
       App.render();
     } catch (e) {
-      App.setStatus('⚠ ' + esc(e.message), true);
+      App.setStatus('⚠ ' + esc(e.message) + ' <button type="button" class="btn" data-retry="load">⟳ حاول تاني</button>', true);
     } finally {
       $('#reloadBtn').disabled = false;
     }
@@ -392,10 +436,28 @@
   }
 
   // ===== الإعدادات =====
+  // سطر صغير في الإعدادات: آخر نسخة احتياطية للشيت
+  async function showBackupInfo() {
+    const el = $('#backupInfo'); el.textContent = ''; el.className = 'muted small';
+    if (!App.settings().url) return;
+    try {
+      const b = await App.api('backupInfo');
+      if (b.scheduled && b.last) { el.innerHTML = `🗄 النسخ الاحتياطي اليومي شغال — آخر نسخة: <b>${esc(b.last)}</b> (${b.count} نسخة)`; return; }
+      el.textContent = b.count
+        ? `🗄 آخر نسخة احتياطية: ${b.last} — بس النسخ اليومي مش متجدول. شغّل setupDailyBackup من Apps Script`
+        : '⚠ مفيش نسخ احتياطي لسه — شغّل setupDailyBackup مرة واحدة من محرر Apps Script (الخطوات في README)';
+      el.className = 'small warn-text';
+    } catch (e) {
+      // كود قديم أو صلاحية Drive لسه ما اتدّتش — مش هنزعج المستخدم
+      if (!/backupInfo/.test(e.message)) { el.textContent = '🗄 حالة النسخ الاحتياطي مش متاحة: ' + e.message; }
+    }
+  }
+
   function openSettings() {
     const s = App.settings();
     $('#sUser').value = s.user; $('#sUrl').value = s.url; $('#sKey').value = s.key; $('#sMsg').textContent = '';
     $('#appVersion').textContent = `إصدار الموقع: ${App.VERSION}`;
+    showBackupInfo();
     $('#settingsDlg').showModal();
     (s.user ? $('#sUrl') : $('#sUser')).focus();
   }
@@ -470,6 +532,14 @@
     $('#settingsForm').addEventListener('submit', saveSettings);
     $('#reloadBtn').addEventListener('click', App.load);
     window.addEventListener('hashchange', App.render);
+    $('#status').addEventListener('click', e => {
+      const b = e.target.closest('[data-retry]'); if (!b) return;
+      if (b.dataset.retry === 'load') App.load();
+      else if (b.dataset.retry === 'wh' && App.views.warehouses) { App.state.wh = null; App.views.warehouses.render(); }
+    });
+    window.addEventListener('offline', () => { document.body.classList.add('offline'); App.toast('📴 النت فصل — التعديلات مش هتتحفظ لحد ما يرجع', 6000); });
+    window.addEventListener('online', () => { document.body.classList.remove('offline'); App.toast('✓ النت رجع', 3000); });
+    if (!navigator.onLine) document.body.classList.add('offline');
     // لو الصفحة مفتوحة من أكتر من 10 دقايق ورجعتلها — نحدّث البيانات (موظفين تانيين ممكن يكونوا عدّلوا)
     document.addEventListener('visibilitychange', () => {
       const busy = document.querySelector('dialog[open]') || (App.sel && App.sel.set.size);

@@ -192,6 +192,11 @@ table.grid { width: 100%; border-collapse: collapse; }
   font: 12px/1.6 "Cairo", system-ui, sans-serif; resize: vertical; }
 @media (max-width: 720px) { .share-preview { grid-template-columns: 1fr; } .share-actions .btn { flex-basis: calc(50% - 8px); } }
 @media print { #shareDlg { display: none; } }
+/* الاتصال */
+.status .btn { margin-inline-start: 8px; padding: 2px 12px; }
+.warn-text { color: var(--warn); }
+body.offline .topbar { border-bottom: 3px solid var(--bad); }
+body.offline .brand::after { content: " • 📴 مفيش نت"; color: var(--bad); font-size: 12px; font-weight: 600; }
 .print-only { display: none; }
 .print-title h2 { margin: 0 0 4px; font-size: 18px; }
 .print-title { margin-bottom: 12px; }

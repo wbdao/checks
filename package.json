@@ -1,0 +1,8 @@
+{
+  "name": "checks",
+  "private": true,
+  "description": "موقع إدارة الشيكات — الاختبارات بتشغّل apps-script/Code.gs على شيت وهمي",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\""
+  }
+}
