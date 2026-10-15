@@ -31,7 +31,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 8px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .brand { font-weight: 700; font-size: 17px; }
 .tabs { display: flex; gap: 4px; }
-.tabs a { padding: 6px 14px; border-radius: 8px; text-decoration: none; color: var(--muted); font-weight: 600; }
+.tabs a { white-space: nowrap; padding: 6px 14px; border-radius: 8px; text-decoration: none; color: var(--muted); font-weight: 600; }
 .tabs a.active { background: var(--primary-weak); color: var(--primary); }
 .top-actions { margin-inline-start: auto; display: flex; gap: 8px; align-items: center; }
 
@@ -85,7 +85,7 @@ table.grid { width: 100%; border-collapse: collapse; }
 .badge.info { background: var(--info-weak); color: var(--info); border-color: transparent; }
 
 /* charts */
-.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px; margin-bottom: 12px; }
 .chart-card { padding: 12px 14px; }
 .chart-card h3 { margin: 0 0 8px; font-size: 14px; }
 .chart-box { position: relative; height: 240px; }
@@ -157,7 +157,6 @@ table.grid { width: 100%; border-collapse: collapse; }
 .cf-list label:hover { background: var(--surface-2); }
 .cf-list .cnt { margin-inline-start: auto; color: var(--muted); font-size: 12px; }
 .field select { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 6px 10px; min-height: 34px; }
-@media (max-width: 720px) { .bulk-row { grid-template-columns: 1fr 1fr; } }
 /* Pivot */
 .chips-inline { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .tog { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); cursor: pointer; font-size: 13px; user-select: none; }
@@ -201,12 +200,119 @@ table.grid { width: 100%; border-collapse: collapse; }
   .badge { background: none !important; border: none; padding: 0; color: #000 !important; }
   .pager { justify-content: space-between; color: #000; }
 }
-@media (max-width: 720px) {
-  .topbar { padding: 8px 12px; }
-  main { padding: 12px 12px 32px; }
-  .cols { grid-template-columns: 1fr; }
+/* ===== التجاوب مع الشاشات ===== */
+
+/* تابلت وأصغر: التبويبات في سطر لوحدها وتتحرك بالسحب */
+@media (max-width: 1024px) {
+  .topbar { gap: 8px 12px; padding: 8px 14px 0; }
+  .brand { order: 1; }
+  .top-actions { order: 2; }
+  .tabs { order: 3; flex: 1 0 100%; overflow-x: auto; scrollbar-width: none; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
+  .tabs::-webkit-scrollbar { display: none; }
+  main { padding: 14px 14px 40px; }
+  .pivot-wrap { max-height: 70vh; }
+  .grid th, .grid td { padding: 6px 8px; }
+  .grid td { font-size: 13px; }
+  .grid td.wrap { max-width: 200px; }
+}
+
+/* شاشة قصيرة (موبايل بالعرض): الجداول بطولها والشريط العلوي مش ثابت */
+@media (max-height: 560px) {
+  .topbar { position: static; }
+  .table-wrap, .pivot-wrap { max-height: none; }
+}
+
+/* شاشات اللمس: أهداف ضغط أكبر */
+@media (pointer: coarse) {
+  .btn { min-height: 38px; }
+  .tabs a { padding: 8px 14px; }
+  .selc input, .chk input, .tog input, .cf-list input { width: 20px; height: 20px; }
+}
+
+/* موبايل */
+@media screen and (max-width: 720px) {
+  body { font-size: 14px; }
+  .brand { font-size: 16px; }
+  .top-actions .small, .top-actions .lbl { display: none; }
+  .top-actions .btn { padding: 6px 10px; font-size: 16px; }
+  main { padding: 12px 10px 110px; }
+
+  /* أقل من 16px بيخلّي iPhone يعمل زووم لما تدوس على الخانة */
+  input, select, textarea { font-size: 16px !important; }
+
   .kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .kpi .val { font-size: 16px; }
+  .kpi { padding: 10px 12px; }
+  .kpi .val { font-size: 16px; overflow-wrap: anywhere; }
+
+  /* الفلاتر: عمودين، والبحث بعرض الشاشة */
+  .filters { padding: 10px; gap: 8px; }
+  .filters > * { flex: 1 1 calc(50% - 8px); min-width: 0; }
+  .filters input[type=search], .filters > h3, .filters > .chips, .filters > .chips-inline, .filters > .section-title { flex-basis: 100%; min-width: 0; }
+  .filters > .grow { display: none; }
+  .filters .inline { justify-content: space-between; }
+  .filters .inline input:not([type=checkbox]), .filters .inline select { flex: 1; min-width: 0; }
+  .filters .btn { flex: 1 1 auto; }
+
+  .cols { grid-template-columns: 1fr; }
+  .chart-box { height: 220px; }
+  .chart-box.tall { height: 260px; }
+  .detail-head h2 { font-size: 17px; }
+  .detail-head .btn { flex: 1 1 auto; }
+  .pager { flex-wrap: wrap; justify-content: center; }
   .table-wrap { max-height: none; }
-  .top-actions .small { display: none; }
+
+  /* الجداول ككروت: كل صف كارت «العمود: القيمة» (data-label بيتحط من core.js) */
+  .grid.cards, .grid.cards tbody { display: block; }
+  .grid.cards thead { display: block; }
+  .grid.cards thead tr { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+  .grid.cards thead th { position: static; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+  .grid.cards thead th.selc { width: auto; padding: 3px 10px; }
+  .grid.cards thead th.selc::after { content: " تحديد الكل"; }
+  .grid.cards tbody tr { display: block; position: relative; margin: 10px; padding: 6px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+  .grid.cards tbody tr:hover { background: var(--surface); }
+  .grid.cards tbody tr.selected { background: var(--primary-weak); border-color: var(--primary); }
+  .grid.cards tbody tr.selected td, .grid.cards tr.row-bad td, .grid.cards tr.row-warn td { background: transparent; }
+  .grid.cards tbody td { display: block; position: relative; min-height: 26px; padding: 4px 12px; padding-inline-start: calc(36% + 12px);
+    border: none; text-align: start; white-space: normal; max-width: none; overflow-wrap: anywhere; }
+  .grid.cards tbody td::before { content: attr(data-label); position: absolute; inset-inline-start: 12px; top: 5px; width: 34%;
+    color: var(--muted); font-size: 12px; line-height: 1.4; }
+  .grid.cards tbody td:not([data-label]), .grid.cards tbody td[data-label=""] { padding-inline-start: 12px; }
+  .grid.cards tbody td:not([data-label])::before, .grid.cards tbody td[data-label=""]::before { content: none; }
+  .grid.cards tbody td:empty, .grid.cards tbody td[data-empty] { display: none; }
+  .grid.cards tbody td.selc { position: absolute; top: 8px; inset-inline-end: 8px; width: auto; min-height: 0; padding: 0; z-index: 1; }
+  .grid.cards tbody td:nth-child(2) { font-weight: 600; }
+
+  /* Pivot يفضل جدول بيتحرك بالعرض */
+  .pivot th, .pivot td { padding: 5px 6px; font-size: 12px; }
+  .pivot th.rowh, .pivot td.rowh { min-width: 110px; max-width: 140px; white-space: normal; }
+
+  /* النوافذ بملء الشاشة */
+  .dlg, .dlg.wide, .dlg.narrow { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; }
+  .dlg form { height: 100%; max-height: 100dvh; }
+  .dlg-body { flex: 1; padding: 12px; }
+  .dlg-head { padding: 10px 12px; }
+  .dlg-head h2 { font-size: 15px; }
+  .dlg-foot { flex-wrap: wrap; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .dlg-foot > span[id] { flex-basis: 100%; }
+  .dlg-foot > .grow { display: none; }
+  .dlg-foot .btn { flex: 1 1 auto; }
+  .fgrid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .fgrid .field:has(textarea) { grid-column: 1 / -1; }
+  .bulk-row { grid-template-columns: 1fr auto; grid-template-areas: "col x" "val val" "mode mode"; padding-bottom: 8px; border-bottom: 1px dashed var(--border); }
+  .bulk-row .col { grid-area: col; } .bulk-row .val { grid-area: val; } .bulk-row .mode { grid-area: mode; } .bulk-row .x { grid-area: x; }
+  .bulk-row .mode.hidden-keep { display: none; }
+  .paste-box { min-height: 140px; }
+
+  /* شريط التحديد وفوقه التنبيهات */
+  .sel-bar { flex-wrap: wrap; bottom: calc(8px + env(safe-area-inset-bottom)); padding: 10px 12px; gap: 8px; }
+  .sel-bar #selInfo { flex-basis: 100%; }
+  .sel-bar #selInfo .muted, .sel-bar .grow { display: none; }
+  .sel-bar .btn { flex: 1 1 auto; }
+  .toast { max-width: calc(100vw - 24px); bottom: calc(16px + env(safe-area-inset-bottom)); text-align: center; }
+}
+
+/* موبايل صغير جداً */
+@media screen and (max-width: 380px) {
+  .fgrid { grid-template-columns: 1fr; }
+  .kpi .val { font-size: 15px; }
 }

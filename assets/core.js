@@ -49,7 +49,7 @@
   ];
 
   const App = window.App = {
-    VERSION: '2026-10-14 — العملاء من الشيتين',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
+    VERSION: '2026-10-15 — موبايل',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
     F, PAID_STATUS, REJECTED,
     state: { headers: [], rows: [], records: [], lists: {}, loaded: false, loadedAt: null },
     views: {},
@@ -422,9 +422,39 @@
     // رسائل خاصة بشاشة معيّنة ما تفضلش ظاهرة في الشاشات التانية
     if (App.statusOwner && App.statusOwner !== v) { App.setStatus(''); App.statusOwner = null; }
     document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('active', a.dataset.view === v));
+    // على الموبايل التبويبات بتتحرك بالسحب — نخلي التبويب الحالي ظاهر
+    const act = document.querySelector('.tabs a.active'), bar = act && act.parentElement;
+    if (bar && bar.scrollWidth > bar.clientWidth) {
+      const a = act.getBoundingClientRect(), b = bar.getBoundingClientRect();
+      if (a.left < b.left || a.right > b.right) bar.scrollLeft += (a.left + a.width / 2) - (b.left + b.width / 2);
+    }
     document.querySelectorAll('.view').forEach(s => s.classList.toggle('hidden', s.id !== 'view-' + v));
     if (App.state.loaded && App.views[v]) App.views[v].render();
   };
+
+  // ===== الجداول على الموبايل =====
+  // كل خلية بتاخد اسم عمودها (data-label)، والـ CSS بيعرض الصف ككارت «العمود: القيمة» على الشاشات الصغيرة
+  const CARD_TABLES = '#checksTable, #custTable, #supTable, #supSumTable, #whTable, #whSumTable, #trTable, #dTable';
+  function labelCells() {
+    document.querySelectorAll(CARD_TABLES).forEach(t => {
+      t.classList.add('cards');
+      const heads = [...t.querySelectorAll('thead th')].map(th => th.classList.contains('selc') ? '' : th.textContent.trim());
+      t.querySelectorAll('tbody tr').forEach(tr => {
+        if (tr.cells.length !== heads.length) return;          // صف «لا توجد نتائج» أو ما شابه
+        [...tr.cells].forEach((td, i) => {
+          if (td.dataset.label !== heads[i]) td.dataset.label = heads[i];
+          const empty = !td.textContent.trim() && !td.querySelector('input, img, svg');
+          if (empty !== ('empty' in td.dataset)) empty ? td.dataset.empty = '' : delete td.dataset.empty;
+        });
+      });
+    });
+  }
+  let labelQueued = false;
+  new MutationObserver(() => {
+    if (labelQueued) return;
+    labelQueued = true;
+    requestAnimationFrame(() => { labelQueued = false; labelCells(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   document.addEventListener('DOMContentLoaded', () => {
     buildForm();
