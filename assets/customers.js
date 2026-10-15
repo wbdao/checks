@@ -56,13 +56,15 @@
   // ===== الالتزام بالسداد =====
   // الشيت ما فيهوش تاريخ السداد الفعلي، فالالتزام بيتحسب من الشيكات اللي ميعادها عدّى (بعد مهلة تحصيل البنك):
   // خالص = ملتزم، استبدال أو اتسدد بعد رفض = نص، مرفوض أو لسه مفتوح = مش ملتزم. النسبة بالقيمة.
-  // الشيكات المردودة (مخازن: تم رد الشيك) مش داخلة في الحساب
+  // مش داخلين في الحساب: الشيكات المردودة (مخازن: تم رد الشيك)، و«امانات لدي المورد» لأنها اتسددت
+  // والعميل مالوش دعوة بموعدها
   const GRACE = 7;   // أيام بعد الاستحقاق قبل ما الشيك المفتوح يتحسب متأخر
   const RATINGS = [[95, 'ممتاز', 'ok'], [85, 'جيد', 'info'], [70, 'متوسط', 'warn'], [0, 'ضعيف', 'bad']];
+  const isDeposit = r => /امان/.test(r.status || '');   // الحاله: امانات لدي المورد
   const daysLate = (r, t) => Math.floor((t - r.dueD) / 864e5);
   function commitment(list, t) {
-    const due = list.filter(r => r.dueD && daysLate(r, t) > GRACE && !r.isReturned);
-    const x = { dueCount: due.length, paid: 0, half: 0, rejected: 0, late: 0, lateAmt: 0, maxLate: 0, pct: null, label: 'لا يوجد مستحق', cls: '' };
+    const due = list.filter(r => r.dueD && daysLate(r, t) > GRACE && !r.isReturned && !isDeposit(r));
+    const x = { deposits: list.filter(isDeposit).length, dueCount: due.length, paid: 0, half: 0, rejected: 0, late: 0, lateAmt: 0, maxLate: 0, pct: null, label: 'لا يوجد مستحق', cls: '' };
     let base = 0, credit = 0;
     for (const r of due) {
       const v = Math.abs(r.netN) || 0, replaced = /استبدال/.test(r.cashState || '');
@@ -210,9 +212,10 @@
       </div>
       <div class="kpis">${[
         ['الالتزام بالسداد', c.commit.pct == null ? '—' : `${c.commit.label} ${c.commit.pct}%`,
-          c.commit.pct == null ? 'مفيش شيكات ميعادها عدّى' : `${c.commit.paid} من ${c.commit.dueCount} شيك مستحق اتسدد` +
+          (c.commit.pct == null ? 'مفيش شيكات ميعادها عدّى' : `${c.commit.paid} من ${c.commit.dueCount} شيك مستحق اتسدد`) +
           (c.commit.half ? ` • ${c.commit.half} استبدال/بعد رفض` : '') + (c.commit.rejected ? ` • ${c.commit.rejected} مرفوض` : '') +
-          (c.commit.late ? ` • ${c.commit.late} متأخر (أقصى ${c.commit.maxLate} يوم)` : ''), c.commit.cls],
+          (c.commit.late ? ` • ${c.commit.late} متأخر (أقصى ${c.commit.maxLate} يوم)` : '') +
+          (c.commit.deposits ? ` • ${c.commit.deposits} امانات لدي المورد مش محسوبة` : ''), c.commit.cls],
         ['إجمالي الشيكات', App.fmt(c.total), `${c.count} شيك${c.whCount ? ` — منهم ${c.whCount} من شيت المخازن` : ''}`, ''],
         ['تم تحصيله (خالص)', App.fmt(c.paid), `نسبة التحصيل ${payRate}%`, 'ok'],
         ['الرصيد المفتوح', App.fmt(c.open), `${c.openCount} شيك`, c.open ? 'warn' : 'ok'],
@@ -247,7 +250,7 @@
         const twin = r.src ? null : inWh.get(r.code + '|' + r.checkNo);
         return `<tr data-id="${esc(r.id)}" data-src="${r.src || 'main'}">
         <td>${r.src ? '<span class="badge info">المخازن</span>' : '<span class="badge">الشيكات</span>'}</td>
-        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span>${isOpen(r) && r.dueD && daysLate(r, t) > 0
+        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span>${isOpen(r) && !isDeposit(r) && r.dueD && daysLate(r, t) > 0
           ? `<span class="sub" style="color:var(--bad)">متأخر ${daysLate(r, t)} يوم</span>` : `<span class="sub">${esc(r.dueState)}</span>`}</td>
         <td>${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span></td><td><b class="num">${App.fmt(r.netN)}</b></td>
         <td>${r.src ? w.stateBadge(r.ref) : App.cashBadge(r)}</td><td>${r.src ? '' : App.statusBadge(r)}</td><td>${esc(r.position)}</td>
