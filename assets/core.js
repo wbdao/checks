@@ -49,7 +49,7 @@
   ];
 
   const App = window.App = {
-    VERSION: '2026-10-15 — نسخ كجدول',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
+    VERSION: '2026-10-15 — إجمالي الشيكات',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
     F, PAID_STATUS, REJECTED,
     state: { headers: [], rows: [], records: [], lists: {}, loaded: false, loadedAt: null },
     views: {},

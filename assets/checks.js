@@ -72,6 +72,13 @@
     $('#checksTable tbody').innerHTML = slice.length
       ? slice.map(r => `<tr data-id="${esc(r.id)}">${App.sel.cell(r)}${COLS.map(c => `<td class="${c.cls || ''}">${c.v(r)}</td>`).join('')}</tr>`).join('')
       : `<tr><td colspan="${COLS.length + 1}" class="muted" style="text-align:center;padding:30px">لا توجد نتائج</td></tr>`;
+    // الإجمالي: كل الشيكات بعد الفلتر (مش الصفحة الظاهرة بس)، تحت عمود الصافي
+    const ni = COLS.findIndex(c => c.k === 'net');
+    const net = filtered.reduce((s, r) => s + r.netN, 0), amount = filtered.reduce((s, r) => s + r.amountN, 0);
+    $('#checksTable tfoot').innerHTML = filtered.length ? `<tr class="total-row">
+      <td colspan="${ni + 1}" data-label="">الإجمالي <span class="muted small">(${filtered.length.toLocaleString('en-US')} شيك${filtered.length > PAGE ? ' — كل الصفحات' : ''})</span></td>
+      <td data-label="الصافي"><b class="num">${App.fmt(net)}</b>${Math.round(amount) !== Math.round(net) ? `<span class="sub num">من ${App.fmt(amount)}</span>` : ''}</td>
+      <td colspan="${COLS.length - ni - 1}" data-label=""></td></tr>` : '';
     $('#checksPager').innerHTML = `<span>${filtered.length ? `${page * PAGE + 1}–${Math.min(filtered.length, (page + 1) * PAGE)} من ${filtered.length.toLocaleString('en-US')}` : ''}</span>
       <span class="btns"><button class="btn ghost" data-p="-1" ${page ? '' : 'disabled'}>السابق</button>
       <span>صفحة ${page + 1} / ${pages}</span>
