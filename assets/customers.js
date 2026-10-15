@@ -53,6 +53,35 @@
     return main.concat(extra);
   }
 
+  // ===== الالتزام بالسداد =====
+  // الشيت ما فيهوش تاريخ السداد الفعلي، فالالتزام بيتحسب من الشيكات اللي ميعادها عدّى (بعد مهلة تحصيل البنك):
+  // خالص = ملتزم، استبدال أو اتسدد بعد رفض = نص، مرفوض أو لسه مفتوح = مش ملتزم. النسبة بالقيمة.
+  // الشيكات المردودة (مخازن: تم رد الشيك) مش داخلة في الحساب
+  const GRACE = 7;   // أيام بعد الاستحقاق قبل ما الشيك المفتوح يتحسب متأخر
+  const RATINGS = [[95, 'ممتاز', 'ok'], [85, 'جيد', 'info'], [70, 'متوسط', 'warn'], [0, 'ضعيف', 'bad']];
+  const daysLate = (r, t) => Math.floor((t - r.dueD) / 864e5);
+  function commitment(list, t) {
+    const due = list.filter(r => r.dueD && daysLate(r, t) > GRACE && !r.isReturned);
+    const x = { dueCount: due.length, paid: 0, half: 0, rejected: 0, late: 0, lateAmt: 0, maxLate: 0, pct: null, label: 'لا يوجد مستحق', cls: '' };
+    let base = 0, credit = 0;
+    for (const r of due) {
+      const v = Math.abs(r.netN) || 0, replaced = /استبدال/.test(r.cashState || '');
+      base += v;
+      if (r.isPaid && !r.isRejected && !replaced) { x.paid++; credit += v; }
+      else if (replaced || r.isPaid) { x.half++; credit += v / 2; }
+      else if (r.isRejected) x.rejected++;
+      else { x.late++; x.lateAmt += v; x.maxLate = Math.max(x.maxLate, daysLate(r, t)); }
+    }
+    if (!due.length) return x;
+    x.pct = base ? Math.round(credit / base * 100) : 100;
+    let i = RATINGS.findIndex(([min]) => x.pct >= min);
+    if (x.rejected && i < 2) i = 2;   // شيك مرفوض لسه ما اتسددش: أعلى تقييم «متوسط»
+    [, x.label, x.cls] = RATINGS[i];
+    return x;
+  }
+  const commitBadge = (x, withPct = true) => x.pct == null ? '<span class="muted small">لا يوجد مستحق</span>'
+    : `<span class="badge ${x.cls}">${x.label}${withPct ? ` <span class="num">${x.pct}%</span>` : ''}</span>`;
+
   // ===== التجميع لكل عميل =====
   function aggregate(recs) {
     const t = App.today(), soon = new Date(t); soon.setDate(soon.getDate() + 30);
@@ -66,7 +95,9 @@
     for (const [code, list] of by) {
       const open = list.filter(isOpen);
       const tenors = list.filter(r => r.dueD && r.recvD).map(r => (r.dueD - r.recvD) / 864e5).filter(d => d >= 0 && d < 2000);
+      const commit = commitment(list, t);
       out.push({
+        commit, commitPct: commit.pct ?? -1,
         code, name: App.customers.get(code)?.name || list[0].name, wh: mode(list.map(r => r.wh)), list,
         count: list.length, whCount: list.filter(r => r.src === 'wh').length, total: sum(list), paid: sum(list.filter(r => r.isPaid)),
         open: sum(open), openCount: open.length,
@@ -90,6 +121,7 @@
     { k: 'total', t: 'إجمالي الشيكات', v: c => `<span class="num">${App.fmt(c.total)}</span>` },
     { k: 'open', t: 'الرصيد المفتوح', v: c => c.open ? `<b class="num">${App.fmt(c.open)}</b><span class="sub">${c.openCount} شيك</span>` : '<span class="badge ok">خالص</span>' },
     { k: 'overdue', t: 'متأخر', v: c => c.overdue ? `<span class="badge bad num">${App.fmt(c.overdue)}</span>` : '' },
+    { k: 'commitPct', t: 'الالتزام بالسداد', v: c => commitBadge(c.commit) + (c.commit.maxLate ? `<span class="sub">أقصى تأخير ${c.commit.maxLate} يوم</span>` : '') },
     { k: 'rejected', t: 'مرفوض', v: c => c.rejected ? `<span class="badge bad">${c.rejected}</span>` : '' },
     { k: 'avgDays', t: 'متوسط الأجل', v: c => c.avgDays != null ? `<span class="num">${c.avgDays}</span> يوم` : '' },
     { k: 'lastRecv', t: 'آخر استلام', v: c => `<span class="num">${App.iso(c.lastRecv)}</span>` },
@@ -108,6 +140,10 @@
       ['متأخر السداد', App.fmt(sum(overdue)), `${overdue.length} شيك — ${new Set(overdue.map(r => r.code)).size} عميل`, 'bad'],
       ['يستحق خلال 30 يوم', App.fmt(sum(upcoming)), `${upcoming.length} شيك`, ''],
       ['شيكات مرفوضة', rej.length.toLocaleString('en-US'), `بقيمة ${App.fmtShort(sum(rej))}`, rej.length ? 'bad' : 'ok'],
+      (() => {
+        const n = l => all.filter(c => c.commit.label === l).length, weak = n('ضعيف');
+        return ['التزام ضعيف بالسداد', weak.toLocaleString('en-US'), `${n('متوسط')} متوسط • ${n('جيد')} جيد • ${n('ممتاز')} ممتاز`, weak ? 'bad' : 'ok'];
+      })(),
     ].map(([l, v, s, c]) => `<div class="kpi ${c}"><div class="lbl">${l}</div><div class="val">${v}</div><div class="sub">${s}</div></div>`).join('');
 
     const col = C();
@@ -141,8 +177,9 @@
   }
 
   function table(all) {
-    const q = $('#cSearch').value.trim().toLowerCase(), wh = $('#cWh').value, openOnly = $('#cOpenOnly').checked;
-    rows = all.filter(c => (!q || (c.code + ' ' + c.name).toLowerCase().includes(q)) && (!wh || c.wh === wh) && (!openOnly || c.open > 0));
+    const q = $('#cSearch').value.trim().toLowerCase(), wh = $('#cWh').value, openOnly = $('#cOpenOnly').checked, cm = $('#cCommit').value;
+    rows = all.filter(c => (!q || (c.code + ' ' + c.name).toLowerCase().includes(q)) && (!wh || c.wh === wh) && (!openOnly || c.open > 0) &&
+      (!cm || (cm === 'none' ? c.commit.pct == null : c.commit.label === cm)));
     rows.sort((a, b) => { const x = a[sortKey] ?? '', y = b[sortKey] ?? ''; return (x > y ? 1 : x < y ? -1 : 0) * (sortAsc ? 1 : -1); });
     $('#custTable thead').innerHTML = `<tr>${COLS.map(c => `<th data-k="${c.k}" class="${c.k === sortKey ? 'sorted' + (sortAsc ? ' asc' : '') : ''}">${c.t}</th>`).join('')}</tr>`;
     const pages = Math.max(1, Math.ceil(rows.length / PAGE));
@@ -172,6 +209,10 @@
         <button class="btn primary" id="dAdd">＋ شيك لهذا العميل</button>
       </div>
       <div class="kpis">${[
+        ['الالتزام بالسداد', c.commit.pct == null ? '—' : `${c.commit.label} ${c.commit.pct}%`,
+          c.commit.pct == null ? 'مفيش شيكات ميعادها عدّى' : `${c.commit.paid} من ${c.commit.dueCount} شيك مستحق اتسدد` +
+          (c.commit.half ? ` • ${c.commit.half} استبدال/بعد رفض` : '') + (c.commit.rejected ? ` • ${c.commit.rejected} مرفوض` : '') +
+          (c.commit.late ? ` • ${c.commit.late} متأخر (أقصى ${c.commit.maxLate} يوم)` : ''), c.commit.cls],
         ['إجمالي الشيكات', App.fmt(c.total), `${c.count} شيك${c.whCount ? ` — منهم ${c.whCount} من شيت المخازن` : ''}`, ''],
         ['تم تحصيله (خالص)', App.fmt(c.paid), `نسبة التحصيل ${payRate}%`, 'ok'],
         ['الرصيد المفتوح', App.fmt(c.open), `${c.openCount} شيك`, c.open ? 'warn' : 'ok'],
@@ -206,7 +247,8 @@
         const twin = r.src ? null : inWh.get(r.code + '|' + r.checkNo);
         return `<tr data-id="${esc(r.id)}" data-src="${r.src || 'main'}">
         <td>${r.src ? '<span class="badge info">المخازن</span>' : '<span class="badge">الشيكات</span>'}</td>
-        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span><span class="sub">${esc(r.dueState)}</span></td>
+        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span>${isOpen(r) && r.dueD && daysLate(r, t) > 0
+          ? `<span class="sub" style="color:var(--bad)">متأخر ${daysLate(r, t)} يوم</span>` : `<span class="sub">${esc(r.dueState)}</span>`}</td>
         <td>${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span></td><td><b class="num">${App.fmt(r.netN)}</b></td>
         <td>${r.src ? w.stateBadge(r.ref) : App.cashBadge(r)}</td><td>${r.src ? '' : App.statusBadge(r)}</td><td>${esc(r.position)}</td>
         <td class="wrap small">${esc(String(r.note || '').slice(0, 90))}</td></tr>`;
@@ -295,6 +337,7 @@
       const re = () => { page = 0; table(aggregate(allRecs())); };
       $('#cSearch').addEventListener('input', App.debounce(re));
       $('#cWh').addEventListener('change', re);
+      $('#cCommit').addEventListener('change', re);
       $('#cOpenOnly').addEventListener('change', re);
       $('#custTable thead').addEventListener('click', e => {
         const k = e.target.closest('th')?.dataset.k; if (!k) return;
