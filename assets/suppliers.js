@@ -124,6 +124,14 @@
         const id = e.target.closest('tr')?.dataset.id; if (id) App.openForm(App.state.records.find(r => r.id === id));
       });
       $('#sPrint').addEventListener('click', () => window.print());
+      $('#sShare').addEventListener('click', () => App.share.open({
+        title: $('#sSupplier').value ? `شيكات لدى المورد: ${$('#sSupplier').value}` : 'شيكات لدى الموردين', file: 'suppliers', rows: list,
+        cols: [
+          ['موقف الشيك', r => r._sup], ['NN', r => r.id], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
+          ['قيمة الشيك', r => App.fmt(r.amountN), { sum: r => r.amountN, num: true }], ['المتبقي', r => App.fmt(r.netN), { sum: r => r.netN, num: true }],
+          ['الاستحقاق', r => App.iso(r.dueD) || r.due], ['خروج الشيك', r => App.iso(r._outD)], ['الحاله', r => r.status], ['حالة الصرف', r => r.cashState],
+        ],
+      }));
       App.sel.bind($('#supTable'), () => list);
     },
   };

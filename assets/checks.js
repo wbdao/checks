@@ -184,7 +184,7 @@
       $('#colFilterBtn').addEventListener('click', () => cfOpen());
       $('#cfCol').addEventListener('change', cfLoad);
       $('#cfSearch').addEventListener('input', App.debounce(cfList, 120));
-      $('#cfList').addEventListener('change', e => { const v = e.target.value; e.target.checked ? cfDraft.add(v) : cfDraft.delete(v); $('#cfInfo').textContent = $('#cfInfo').textContent.replace(/محدد d+/, 'محدد ' + cfDraft.size); });
+      $('#cfList').addEventListener('change', e => { const v = e.target.value; e.target.checked ? cfDraft.add(v) : cfDraft.delete(v); $('#cfInfo').textContent = $('#cfInfo').textContent.replace(/محدد \d+/, 'محدد ' + cfDraft.size); });
       $('#cfAll').addEventListener('click', () => { $('#cfList').querySelectorAll('input').forEach(i => { i.checked = true; cfDraft.add(i.value); }); cfList(); });
       $('#cfNone').addEventListener('click', () => { cfDraft.clear(); cfList(); });
       $('#cfRemove').addEventListener('click', () => { delete colF[$('#cfCol').value]; $('#colFilterDlg').close(); page = 0; apply(); kpis(); table(); chips(); });
@@ -195,6 +195,14 @@
         const c = e.target.closest('.chip'); if (c) cfOpen(c.dataset.k);
       });
       $('#exportBtn').addEventListener('click', exportCsv);
+      $('#shareBtn').addEventListener('click', () => App.share.open({
+        title: 'الشيكات', file: 'checks', rows: filtered,
+        cols: [
+        ['NN', r => r.id], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
+        ['صافى الشيك', r => App.fmt(r.netN), { sum: r => r.netN, num: true }], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
+        ['الحاله', r => r.status], ['موقف الشيك', r => r.position], ['حالة الصرف', r => r.cashState],
+        ],
+      }));
     },
     // يُستخدم من شاشة العملاء لفتح الشيكات بفلتر عميل
     showCustomer(code) { $('#fSearch').value = code; location.hash = '#checks'; },

@@ -176,6 +176,14 @@
         if (drill) $('#trDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
       $('#trDetailClose').addEventListener('click', () => { drill = null; render(); });
+      $('#trShare').addEventListener('click', () => App.share.open({
+        title: $('#trDetailTitle').textContent, file: 'treasury', rows: list,
+        cols: [
+        ['NN', r => r.id], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
+        ['صافى الشيك', r => App.fmt(r.netN), { sum: r => r.netN, num: true }], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
+        ['الحاله', r => r.status], ['موقف الشيك', r => r.position], ['المورد المتوقع', r => r.supplier],
+        ],
+      }));
       $('#trTable tbody').addEventListener('click', e => {
         const id = e.target.closest('tr')?.dataset.id; if (id) App.openForm(App.state.records.find(r => r.id === id));
       });

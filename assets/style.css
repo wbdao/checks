@@ -180,6 +180,18 @@ table.grid { width: 100%; border-collapse: collapse; }
 .pivot tfoot td { position: sticky; bottom: 0; background: var(--surface-2); font-weight: 700; border-top: 2px solid var(--border); }
 .pivot tfoot td.rowh { background: var(--surface-2); z-index: 3; }
 .pivot td.active { outline: 2px solid var(--primary); outline-offset: -2px; background: var(--primary-weak); }
+/* مشاركة الجدول */
+.share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.share-actions .btn { flex: 1 1 160px; min-height: 40px; }
+.btn.share-wa { background: #25d366; border-color: #25d366; color: #fff; font-weight: 600; }
+.share-preview { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+.share-img { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); max-height: 420px; overflow: auto; min-height: 120px; }
+.share-img img { display: block; max-width: 100%; height: auto; }
+.share-img.loading::after { content: "جاري تجهيز الصورة…"; display: block; padding: 40px; text-align: center; color: var(--muted); }
+.share-text { width: 100%; min-height: 200px; max-height: 420px; border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--surface);
+  font: 12px/1.6 "Cairo", system-ui, sans-serif; resize: vertical; }
+@media (max-width: 720px) { .share-preview { grid-template-columns: 1fr; } .share-actions .btn { flex-basis: calc(50% - 8px); } }
+@media print { #shareDlg { display: none; } }
 .print-only { display: none; }
 .print-title h2 { margin: 0 0 4px; font-size: 18px; }
 .print-title { margin-bottom: 12px; }

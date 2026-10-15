@@ -190,6 +190,7 @@
           <div class="section-title"><h3>شيكات العميل</h3></div><span class="grow"></span>
           <select id="dSrc" autocomplete="off"><option value="">الشيتين</option><option value="main">شيت الشيكات</option><option value="wh">شيت المخازن</option></select>
           <label class="inline chk"><input type="checkbox" id="dOpenOnly" ${c.open ? 'checked' : ''}> غير الخالص فقط</label>
+          <button type="button" class="btn ghost" id="dShare">📤 مشاركة</button>
         </div>
         <div class="table-wrap"><table class="grid" id="dTable"><thead><tr>
           <th>الشيت</th><th>NN / WH</th><th>الاستحقاق</th><th>البنك / رقم الشيك</th><th>الصافي</th><th>حالة الصرف</th><th>الحاله</th><th>موقف الشيك</th><th>بيان</th>
@@ -197,9 +198,10 @@
       </div>`;
 
     const w = WH();
+    let shown = [];   // الشيكات الظاهرة في الجدول (للمشاركة)
     const drawTable = () => {
       const only = $('#dOpenOnly').checked, src = $('#dSrc').value;
-      const list = c.list.filter(r => (!only || isOpen(r)) && (!src || (r.src || 'main') === src)).sort((a, b) => (b.dueD || 0) - (a.dueD || 0));
+      const list = shown = c.list.filter(r => (!only || isOpen(r)) && (!src || (r.src || 'main') === src)).sort((a, b) => (b.dueD || 0) - (a.dueD || 0));
       $('#dTable tbody').innerHTML = list.map(r => {
         const twin = r.src ? null : inWh.get(r.code + '|' + r.checkNo);
         return `<tr data-id="${esc(r.id)}" data-src="${r.src || 'main'}">
@@ -213,6 +215,14 @@
     };
     drawTable();
     $('#dOpenOnly').addEventListener('change', drawTable);
+    $('#dShare').addEventListener('click', () => App.share.open({
+      title: `شيكات العميل: ${c.name} (${c.code})`, file: 'customer-' + c.code, rows: shown,
+      cols: [
+        ['الشيت', r => r.src ? 'المخازن' : 'الشيكات'], ['NN / WH', r => r.id], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
+        ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo], ['الصافي', r => App.fmt(r.netN), { sum: r => r.netN, num: true }],
+        ['الحاله', r => r.status || (r.ref && r.ref.state) || ''], ['موقف الشيك', r => r.position],
+      ],
+    }));
     $('#dSrc').addEventListener('change', drawTable);
     $('#dTable tbody').addEventListener('click', e => {
       const tr = e.target.closest('tr'), id = tr?.dataset.id; if (!id) return;

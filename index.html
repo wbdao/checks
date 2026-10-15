@@ -7,7 +7,7 @@
 <title>إدارة الشيكات</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="assets/style.css?v=20261015-m1">
+<link rel="stylesheet" href="assets/style.css?v=20261015-s1">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -50,6 +50,7 @@
       <button class="btn ghost" id="colFilterBtn" title="فلترة أي عمود من أعمدة الشيت">⏷ فلتر الشيت</button>
       <button class="btn ghost" id="fReset">مسح</button>
       <span class="grow"></span>
+      <button class="btn ghost" id="shareBtn">📤 مشاركة</button>
       <button class="btn ghost" id="exportBtn">⬇ تصدير CSV</button>
       <button class="btn ghost" id="importBtn">📋 إدراج من جدول</button>
       <button class="btn primary" id="addBtn">＋ إضافة شيك</button>
@@ -113,6 +114,7 @@
       <button class="btn ghost" id="wReset">مسح</button>
       <span class="grow"></span>
       <button class="btn ghost" id="wExport">⬇ تصدير CSV</button>
+      <button class="btn ghost" id="wShare">📤 مشاركة</button>
       <button class="btn ghost" id="wPrint">🖨 طباعة</button>
       <button class="btn ghost" id="wImport">📋 إدراج من جدول</button>
       <button class="btn primary" id="wAdd">＋ إضافة شيك</button>
@@ -162,6 +164,7 @@
     <div id="trDetail" class="card table-card hidden" style="margin-top:12px">
       <div class="filters" style="margin:0;border-bottom:1px solid var(--border)">
         <h3 id="trDetailTitle" style="margin:0;font-size:15px"></h3><span class="grow"></span>
+        <button class="btn ghost" id="trShare">📤 مشاركة</button>
         <button class="btn ghost" id="trDetailClose">✕ إغلاق</button>
       </div>
       <div class="table-wrap"><table class="grid" id="trTable"><thead></thead><tbody></tbody></table></div>
@@ -190,6 +193,7 @@
       </select>
       <button class="btn ghost" id="sReset">مسح</button>
       <span class="grow"></span>
+      <button class="btn ghost" id="sShare">📤 مشاركة</button>
       <button class="btn ghost" id="sPrint">🖨 طباعة كشف</button>
     </div>
 
@@ -325,6 +329,29 @@
   <button class="btn primary" id="selEdit">✎ تعديل جماعي</button>
 </div>
 
+<!-- مشاركة الجدول -->
+<dialog id="shareDlg" class="dlg">
+  <form method="dialog" id="shareForm">
+    <div class="dlg-head"><h2 id="shTitle">مشاركة</h2><button type="button" class="x" data-close>✕</button></div>
+    <div class="dlg-body">
+      <p id="shSub" class="muted small" style="margin-top:0"></p>
+      <div class="share-actions">
+        <button type="button" class="btn share-wa" id="shWa">🟢 واتساب (نص)</button>
+        <button type="button" class="btn" id="shCopy">📋 نسخ كنص</button>
+        <button type="button" class="btn primary hidden" id="shImgShare">🖼 مشاركة كصورة</button>
+        <button type="button" class="btn" id="shImgDl">⬇ تحميل الصورة</button>
+        <button type="button" class="btn" id="shCsv">📊 Excel (CSV)</button>
+        <button type="button" class="btn hidden" id="shNative">📤 مشاركة…</button>
+      </div>
+      <div class="share-preview">
+        <div id="shImgWrap" class="share-img loading"><img id="shImg" alt="معاينة صورة الجدول"></div>
+        <textarea id="shText" class="share-text" readonly aria-label="نص الجدول"></textarea>
+      </div>
+    </div>
+    <div class="dlg-foot"><span id="shMsg" class="small"></span><span class="grow"></span><button type="button" class="btn ghost" data-close>إغلاق</button></div>
+  </form>
+</dialog>
+
 <!-- الإعدادات -->
 <dialog id="settingsDlg" class="dlg narrow">
   <form id="settingsForm" method="dialog">
@@ -357,13 +384,14 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="assets/core.js?v=20261015-m1"></script>
-<script src="assets/bulk.js?v=20261015-m1"></script>
-<script src="assets/checks.js?v=20261015-m1"></script>
-<script src="assets/customers.js?v=20261015-m1"></script>
-<script src="assets/import.js?v=20261015-m1"></script>
-<script src="assets/suppliers.js?v=20261015-m1"></script>
-<script src="assets/treasury.js?v=20261015-m1"></script>
-<script src="assets/warehouses.js?v=20261015-m1"></script>
+<script src="assets/core.js?v=20261015-s1"></script>
+<script src="assets/share.js?v=20261015-s1"></script>
+<script src="assets/bulk.js?v=20261015-s1"></script>
+<script src="assets/checks.js?v=20261015-s1"></script>
+<script src="assets/customers.js?v=20261015-s1"></script>
+<script src="assets/import.js?v=20261015-s1"></script>
+<script src="assets/suppliers.js?v=20261015-s1"></script>
+<script src="assets/treasury.js?v=20261015-s1"></script>
+<script src="assets/warehouses.js?v=20261015-s1"></script>
 </body>
 </html>
