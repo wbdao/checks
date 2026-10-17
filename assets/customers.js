@@ -70,32 +70,110 @@
   }
 
   // ===== الالتزام بالسداد =====
-  // الشيت ما فيهوش تاريخ السداد الفعلي، فالالتزام بيتحسب من الشيكات اللي ميعادها عدّى (بعد مهلة تحصيل البنك):
-  // خالص = ملتزم، استبدال أو اتسدد بعد رفض = نص، مرفوض أو لسه مفتوح = مش ملتزم. النسبة بالقيمة.
+  // بيتحسب من الشيكات اللي ميعادها عدّى (بعد مهلة تحصيل البنك). النسبة بالقيمة:
+  // خالص وليه «تاريخ التحصيل»: اتسدد خلال المهلة = ملتزم، بعدها = نص. خالص من غير تاريخ (قبل ما العمود يتعمل) = ملتزم.
+  // شيك اتدفع على دفعات (زيادات «دفعات شيكات» في سجل التعديلات): كل دفعة بتاريخها — خلال المهلة = قيمتها كاملة،
+  // بعدها = نصها، والباقي اللي لسه ما اتدفعش = مش ملتزم. الدفعات اللي مالهاش تاريخ معروف (قبل السجل) = ملتزم.
+  // استبدال أو اتسدد بعد رفض = نص، مرفوض أو لسه مفتوح = مش ملتزم.
   // مش داخلين في الحساب: الشيكات المردودة (مخازن: تم رد الشيك)، و«امانات لدي المورد» لأنها اتسددت
   // والعميل مالوش دعوة بموعدها
-  const GRACE = 7;   // أيام بعد الاستحقاق قبل ما الشيك المفتوح يتحسب متأخر
+  const GRACE = 7;   // أيام بعد الاستحقاق قبل ما الشيك يتحسب متأخر
   const RATINGS = [[95, 'ممتاز', 'ok'], [85, 'جيد', 'info'], [70, 'متوسط', 'warn'], [0, 'ضعيف', 'bad']];
   const isDeposit = r => /امان/.test(r.status || '');   // الحاله: امانات لدي المورد
   const daysLate = (r, t) => Math.floor((t - r.dueD) / 864e5);
+  const lateOn = (r, d) => Math.round((d - r.dueD) / 864e5);   // أيام من الاستحقاق لحد يوم الدفع
+  const paidLate = r => r.isPaid && r.paidD && r.dueD ? lateOn(r, r.paidD) : null;
+
+  // دفعات الشيكات من «سجل التعديلات» (إجراء payments في Code.gs): { NN: [[yyyy-MM-dd, مبلغ], …] }.
+  // بتتحمّل في الخلفية مرة مع كل تحميل للبيانات، ولو Code.gs قديم الحساب بيفضل زي الأول
+  let pays = {}, paysFor = null, paysBusy = false;
+  function ensurePays() {
+    const k = App.state.loadedAt;
+    if (paysBusy || !k || paysFor === k) return;
+    paysBusy = true;
+    App.api('payments').then(d => { pays = d.map || {}; }).catch(() => { })
+      .finally(() => { paysFor = k; paysBusy = false; if (/^#customers/.test(location.hash)) render(); });
+  }
+  // شيك ليه دفعات بتاريخها: تفاصيل كل دفعة وتقييمها. null = مفيش دفعات في السجل (الحساب العادي)
+  function installments(r, t) {
+    const logged = !r.src && pays[r.id];
+    if (!logged || !logged.length || !r.dueD) return null;
+    const parts = logged.map(([d, a]) => ({ d: App.parseDate(d), a: +a || 0 })).filter(p => p.d && p.a > 0);
+    if (!parts.length) return null;
+    const amount = r.amountN || parts.reduce((s, p) => s + p.a, 0);
+    const loggedSum = parts.reduce((s, p) => s + p.a, 0);
+    const unknown = Math.max(0, Math.min(r.paidN, amount) - loggedSum);   // اتدفع قبل السجل أو من الشيت — تاريخه مش معروف
+    const rest = Math.max(0, amount - Math.max(r.paidN, loggedSum));      // الباقي بعد الدفعات
+    if (r.isPaid && rest > 0) { if (r.paidD) parts.push({ d: r.paidD, a: rest, last: true }); }
+    const y = { n: parts.length + (unknown > 0 ? 1 : 0) + (r.isPaid && rest > 0 && !r.paidD ? 1 : 0), base: amount,
+      paid: 0, onTime: 0, credit: 0, late: [], open: 0, openDays: 0 };
+    for (const p of parts) {
+      const dl = lateOn(r, p.d);
+      y.paid += p.a;
+      if (dl <= GRACE) { y.onTime += p.a; y.credit += p.a; } else { y.credit += p.a / 2; y.late.push(dl); }
+    }
+    const known = unknown + (r.isPaid && rest > 0 && !r.paidD ? rest : 0);   // دفعات من غير تاريخ = في الميعاد زي الأول
+    y.paid += known; y.onTime += known; y.credit += known;
+    if (!r.isPaid && rest > 0) { y.open = rest; y.openDays = daysLate(r, t); }
+    y.pct = y.paid ? Math.round(y.onTime / y.paid * 100) : 0;
+    return y;
+  }
+
   function commitment(list, t) {
     const due = list.filter(r => r.dueD && daysLate(r, t) > GRACE && !r.isReturned && !isDeposit(r));
-    const x = { deposits: list.filter(isDeposit).length, dueCount: due.length, paid: 0, half: 0, rejected: 0, late: 0, lateAmt: 0, maxLate: 0, pct: null, label: 'لا يوجد مستحق', cls: '' };
+    const x = { deposits: list.filter(isDeposit).length, dueCount: due.length, paid: 0, half: 0, rejected: 0, late: 0, lateAmt: 0,
+      openMaxLate: 0, paidTotal: 0, dated: 0, paidLate: 0, paidAvgLate: 0, paidMaxLate: 0, inst: 0, maxLate: 0, pct: null, label: 'لا يوجد مستحق', cls: '' };
     let base = 0, credit = 0;
+    const lateDays = [];   // أيام التأخير لكل دفعة اتدفعت بعد المهلة
+    const openLate = (r, v) => { x.late++; x.lateAmt += v; x.openMaxLate = Math.max(x.openMaxLate, daysLate(r, t)); };
     for (const r of due) {
       const v = Math.abs(r.netN) || 0, replaced = /استبدال/.test(r.cashState || '');
+      const y = !r.isRejected && !replaced ? installments(r, t) : null;
+      if (y) {
+        x.inst++; base += y.base; credit += y.credit; lateDays.push(...y.late);
+        if (r.isPaid) { x.paidTotal++; x.dated++; y.late.length ? x.paidLate++ : x.paid++; }
+        else if (y.open) openLate(r, y.open);
+        continue;
+      }
       base += v;
-      if (r.isPaid && !r.isRejected && !replaced) { x.paid++; credit += v; }
+      if (r.isPaid && !r.isRejected && !replaced) {
+        x.paidTotal++;
+        const d = paidLate(r);
+        if (d != null) x.dated++;
+        if (d == null || d <= GRACE) { x.paid++; credit += v; }
+        else { x.paidLate++; credit += v / 2; lateDays.push(d); }
+      }
       else if (replaced || r.isPaid) { x.half++; credit += v / 2; }
       else if (r.isRejected) x.rejected++;
-      else { x.late++; x.lateAmt += v; x.maxLate = Math.max(x.maxLate, daysLate(r, t)); }
+      else openLate(r, v);
     }
+    x.paidMaxLate = lateDays.length ? Math.max(...lateDays) : 0;
+    x.paidAvgLate = lateDays.length ? Math.round(lateDays.reduce((a, b) => a + b, 0) / lateDays.length) : 0;
+    x.maxLate = Math.max(x.openMaxLate, x.paidMaxLate);
     if (!due.length) return x;
     x.pct = base ? Math.round(credit / base * 100) : 100;
     let i = RATINGS.findIndex(([min]) => x.pct >= min);
     if (x.rejected && i < 2) i = 2;   // شيك مرفوض لسه ما اتسددش: أعلى تقييم «متوسط»
     [, x.label, x.cls] = RATINGS[i];
     return x;
+  }
+  // السطر الصغير تحت الاستحقاق في جدول شيكات العميل
+  function dueNote(r, t) {
+    const y = !r.isRejected && !/استبدال/.test(r.cashState || '') ? installments(r, t) : null;
+    if (y) {
+      const tip = `title="${esc(pays[r.id].map(([d, a]) => `${d}: ${App.fmt(a)}`).join(' • ') + (r.paidD ? ` • تاريخ التحصيل ${App.iso(r.paidD)}` : ''))}"`;
+      const color = y.pct === 100 && !y.open ? 'ok' : y.pct >= 50 ? 'warn' : 'bad';
+      return `<span class="sub" style="color:var(--${color})" ${tip}>اتدفع ${y.n === 1 ? 'منه دفعة واحدة' : y.n === 2 ? 'على دفعتين' : `على ${y.n} دفعات`} — ${y.pct}% في الميعاد</span>` +
+        (y.open && y.openDays > 0 ? `<span class="sub" style="color:var(--bad)">الباقي ${App.fmt(y.open)} متأخر ${y.openDays} يوم</span>` : '');
+    }
+    const d = paidLate(r);
+    if (d != null) {
+      const tip = `title="تاريخ التحصيل ${esc(App.iso(r.paidD))}"`;
+      return d <= GRACE ? `<span class="sub" style="color:var(--ok)" ${tip}>اتسدد في الميعاد</span>`
+        : `<span class="sub" style="color:var(--warn)" ${tip}>اتسدد متأخر ${d} يوم</span>`;
+    }
+    if (isOpen(r) && !isDeposit(r) && r.dueD && daysLate(r, t) > 0) return `<span class="sub" style="color:var(--bad)">متأخر ${daysLate(r, t)} يوم</span>`;
+    return `<span class="sub">${esc(r.dueState)}</span>`;
   }
   const commitBadge = (x, withPct = true) => x.pct == null ? '<span class="muted small">لا يوجد مستحق</span>'
     : `<span class="badge ${x.cls}">${x.label}${withPct ? ` <span class="num">${x.pct}%</span>` : ''}</span>`;
@@ -243,10 +321,14 @@
       </div>
       <div class="kpis">${[
         ['الالتزام بالسداد', c.commit.pct == null ? '—' : `${c.commit.label} ${c.commit.pct}%`,
-          (c.commit.pct == null ? 'مفيش شيكات ميعادها عدّى' : `${c.commit.paid} من ${c.commit.dueCount} شيك مستحق اتسدد`) +
+          (c.commit.pct == null ? 'مفيش شيكات ميعادها عدّى' : `${c.commit.paid} من ${c.commit.dueCount} شيك مستحق اتسدد في الميعاد`) +
+          (c.commit.paidLate ? ` • ${c.commit.paidLate} اتسدد متأخر (متوسط ${c.commit.paidAvgLate} يوم، أقصى ${c.commit.paidMaxLate})` : '') +
+          (c.commit.inst ? ` • ${c.commit.inst} شيك بالدفعات متحسب كل دفعة بتاريخها` : '') +
           (c.commit.half ? ` • ${c.commit.half} استبدال/بعد رفض` : '') + (c.commit.rejected ? ` • ${c.commit.rejected} مرفوض` : '') +
-          (c.commit.late ? ` • ${c.commit.late} متأخر (أقصى ${c.commit.maxLate} يوم)` : '') +
-          (c.commit.deposits ? ` • ${c.commit.deposits} امانات لدي المورد مش محسوبة` : ''), c.commit.cls],
+          (c.commit.late ? ` • ${c.commit.late} لسه مفتوح متأخر (أقصى ${c.commit.openMaxLate} يوم)` : '') +
+          (c.commit.deposits ? ` • ${c.commit.deposits} امانات لدي المورد مش محسوبة` : '') +
+          (c.commit.paidTotal ? `<br>تاريخ التحصيل معروف لـ ${c.commit.dated} من ${c.commit.paidTotal} شيك خالص` +
+            (c.commit.dated < c.commit.paidTotal ? ' — الباقي متحسب في الميعاد' : '') : ''), c.commit.cls],
         ['إجمالي الشيكات', App.fmt(c.total), `${c.count} شيك${c.whCount ? ` — منهم ${c.whCount} من شيت المخازن` : ''}`, ''],
         ['تم تحصيله (خالص)', App.fmt(c.paid), `نسبة التحصيل ${payRate}%`, 'ok'],
         ['الرصيد المفتوح', App.fmt(c.open), `${c.openCount} شيك`, c.open ? 'warn' : 'ok'],
@@ -284,8 +366,7 @@
         const twin = r.src ? null : inWh.get(r.code + '|' + r.checkNo);
         return `<tr data-id="${esc(r.id)}" data-src="${r.src || 'main'}">
         <td>${r.src ? '<span class="badge info">المخازن</span>' : '<span class="badge">الشيكات</span>'}</td>
-        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="small">${esc(r.drawer)}</span></td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span>${isOpen(r) && !isDeposit(r) && r.dueD && daysLate(r, t) > 0
-          ? `<span class="sub" style="color:var(--bad)">متأخر ${daysLate(r, t)} يوم</span>` : `<span class="sub">${esc(r.dueState)}</span>`}</td>
+        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="small">${esc(r.drawer)}</span></td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span>${dueNote(r, t)}</td>
         <td>${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span></td><td><b class="num">${App.fmt(r.netN)}</b></td>
         <td>${r.src ? w.stateBadge(r.ref) : App.cashBadge(r)}</td><td>${r.src ? '' : App.statusBadge(r)}</td><td>${esc(r.position)}</td>
         <td class="wrap small">${esc(String(r.note || '').slice(0, 90))}</td></tr>`;
@@ -384,6 +465,7 @@
 
   function render() {
     WH()?.ensure();   // شيت المخازن بيتحمّل في الخلفية، ولما يخلص الشاشة بتترسم تاني بيه
+    ensurePays();     // وكمان دفعات الشيكات من سجل التعديلات
     const recs = allRecs(), all = aggregate(recs);
     const code = decodeURIComponent(location.hash.split('/')[1] || '');
     const c = code && all.find(x => x.code === code);

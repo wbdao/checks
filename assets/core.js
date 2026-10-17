@@ -10,6 +10,7 @@
     bank: 'البنك', checkNo: 'رقم الشيك', dueState: 'حالة الشيك', position: 'موقف الشيك',
     cashState: 'حالة الصرف', status: 'الحاله', outDate: 'تاريخ خروج الشيك', receiver: 'اسم المستلم',
     supplier: 'المورد المتوقع', note: 'بيان', remind: 'تذكير', id: 'NN',
+    paidAt: 'تاريخ التحصيل',   // اختياري — Apps Script بيكتبه لوحده لما الحاله تبقى خالص
   };
   const PAID_STATUS = 'خالص';
   const REJECTED = ['تم الرفض'];
@@ -49,7 +50,7 @@
   ];
 
   const App = window.App = {
-    VERSION: '2026-10-17 — المورد المتوقع في الشيكات',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
+    VERSION: '2026-10-17 — دخول باسم مستخدم وكلمة سر + صلاحيات',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
     F, PAID_STATUS, REJECTED,
     state: { headers: [], rows: [], records: [], lists: {}, loaded: false, loadedAt: null },
     views: {},
@@ -105,13 +106,47 @@
     get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { } },
   };
-  App.settings = () => ({ url: store.get('checks.apiUrl'), key: store.get('checks.apiKey'), user: store.get('checks.user').trim() });
+  // الرابط ثابت في assets/config.js — لو فاضي بنستخدم الرابط المكتوب في الإعدادات (زي الأول)
+  App.API_URL = String((window.CHECKS_CONFIG || {}).API_URL || '').trim();
+  // الجلسة: { token, name, role, username } من login — الاسم والصلاحية بيتحددوا على السيرفر، ودول للعرض بس
+  App.session = () => { try { return JSON.parse(store.get('checks.session') || 'null') || {}; } catch { return {}; } };
+  App.settings = () => ({ url: App.API_URL || store.get('checks.apiUrl'), token: App.session().token || '' });
+  App.ROLE_VIEW = 'مشاهدة'; App.ROLE_EDIT = 'تعديل'; App.ROLE_ADMIN = 'مدير';
+  App.canEdit = () => { const r = App.session().role; return r === App.ROLE_EDIT || r === App.ROLE_ADMIN; };
+  App.isAdmin = () => App.session().role === App.ROLE_ADMIN;
+  function setSession(sess) {
+    try { sess ? localStorage.setItem('checks.session', JSON.stringify(sess)) : localStorage.removeItem('checks.session'); } catch { }
+    if (sess && sess.username) store.set('checks.lastUser', sess.username);
+    if (!sess) {   // البيانات ما تفضلش ظاهرة بعد الخروج أو انتهاء الدخول
+      App.state.loaded = false; App.state.records = []; App.state.wh = null;
+      if ($('#syncInfo')) $('#syncInfo').textContent = '';
+      if (App.render) App.render();
+    }
+    try { localStorage.removeItem('checks.apiKey'); localStorage.removeItem('checks.user'); } catch { }   // من النسخ القديمة
+    showUser();
+  }
+  // شريط فوق: الاسم والصلاحية + خروج، و«المستخدمين» للمدير. ومع «مشاهدة» body.ro بيخفي أزرار الإضافة والتعديل
+  function showUser() {
+    const s = App.session(), on = !!s.token;
+    $('#who').innerHTML = on ? `👤 <b>${esc(s.name)}</b> <span class="muted">(${esc(s.role)})</span>` : '';
+    $('#who').classList.toggle('hidden', !on);
+    $('#logoutBtn').classList.toggle('hidden', !on);
+    $('#usersBtn').classList.toggle('hidden', !(on && App.isAdmin()));
+    document.body.classList.toggle('ro', on && !App.canEdit());
+    document.body.classList.toggle('locked', !on);   // من غير دخول: البيانات القديمة ما تبانش
+  }
+  // نافذة شيك لمستخدم «مشاهدة»: الخانات للعرض بس
+  App.lockForm = (form) => {
+    const ro = !App.canEdit();
+    form.querySelectorAll('input, select, textarea').forEach(x => { x.disabled = ro; });
+    return ro;
+  };
 
   // ===== الاتصال =====
-  // إجراءات الكتابة — بتتسجل في «سجل التعديلات» باسم الموظف، فمن غير اسم مش هتتبعت
-  const WRITES = ['add', 'addMany', 'update', 'updateMany', 'whAdd', 'whUpdate', 'whFillIds'];
+  // إجراءات الكتابة — بتتسجل في «سجل التعديلات» باسم المستخدم اللي داخل
+  const WRITES = ['add', 'addMany', 'update', 'updateMany', 'whAdd', 'whUpdate', 'whFillIds', 'userSave'];
   // مهلة كل طلب (بالمللي ثانية) — قراءة الشيت كله ممكن تاخد وقت أول مرة
-  const TIMEOUTS = { list: 120e3, listWh: 90e3, history: 60e3, backupInfo: 30e3 };
+  const TIMEOUTS = { list: 120e3, listWh: 90e3, history: 60e3, backupInfo: 30e3, login: 60e3, logout: 20e3, users: 30e3 };
   const WRITE_TIMEOUT = 90e3;
   // طلب كتابة ما وصلش رده (النت فصل/المهلة خلصت) بيحتفظ برقمه المميز: لو اتبعت تاني بنفس البيانات
   // السيرفر بيعرف إنه نفس الطلب وما بيكتبش مرتين
@@ -133,10 +168,11 @@
   }
 
   App.api = async (action, payload = {}) => {
-    const { url, key, user } = App.settings();
+    const { url, token } = App.settings();
     if (!url) throw new Error('لم يتم ضبط رابط Apps Script — افتح الإعدادات');
     const write = WRITES.includes(action);
-    if (write && !user) throw new Error('اكتب اسمك في ⚙ الإعدادات (اسم الموظف) الأول — علشان التعديل يتسجل باسمك');
+    if (action !== 'login' && !token) { setTimeout(openSettings, 0); throw new Error('سجّل دخول الأول (اسم المستخدم وكلمة السر)'); }
+    if (write && action !== 'userSave' && !App.canEdit()) throw new Error('صلاحيتك «مشاهدة» — مش مسموحلك تضيف أو تعدّل');
     let rid, sig;
     if (write) { sig = action + '|' + JSON.stringify(payload); rid = pendingRid.get(sig) || newRid(); pendingRid.set(sig, rid); }
     const ms = TIMEOUTS[action] || WRITE_TIMEOUT;
@@ -146,7 +182,7 @@
     try {
       // text/plain لتجنب طلب preflight مع Apps Script
       res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action, key, user, rid, ...payload }), signal: ctrl ? ctrl.signal : undefined });
+        body: JSON.stringify({ action, token, rid, ...payload }), signal: ctrl ? ctrl.signal : undefined });
     } catch (e) {
       throw new Error(netError(e, write, ms));
     } finally {
@@ -156,7 +192,10 @@
     let data;
     try { data = await res.json(); } catch { throw new Error('رد غير متوقع من Apps Script — تأكد من النشر بصلاحية Anyone'); }
     if (write) pendingRid.delete(sig);   // وصل رد أكيد (نجاح أو رفض) — المرة الجاية طلب جديد
-    if (!data.ok) throw new Error(data.error || 'خطأ غير معروف');
+    if (!data.ok) {
+      if (data.login && action !== 'login') { setSession(null); App.setStatus('🔒 ' + esc(data.error)); setTimeout(() => openSettings(data.error), 0); throw new Error(data.error); }   // الدخول انتهى أو الحساب اتوقف
+      throw new Error(data.error || 'خطأ غير معروف');
+    }
     if (data.duplicate) {
       if (data.reload) {   // النتيجة القديمة كانت كبيرة على الكاش — نحمّل البيانات من جديد
         setTimeout(() => App.load(), 0);
@@ -197,6 +236,7 @@
     r.netN = (r.net !== '' && typeof r.net === 'number') ? r.net : r.amountN - r.paidN;
     r.dueD = App.parseDate(r.due);
     r.recvD = App.parseDate(r.recv);
+    r.paidD = App.parseDate(r.paidAt);
     // نحسبها هنا بنفس معادلة الشيت حتى تكون محدثة دائماً
     r.dueState = r.dueD ? (r.dueD <= App.today() ? 'مستحق' : 'تحت التحصيل') : String(r.dueState || '');
     for (const k of ['code', 'name', 'wh', 'status', 'cashState', 'position', 'bank', 'id', 'checkNo', 'supplier'])
@@ -221,6 +261,9 @@
       const d = await App.api('list');
       App.state.headers = d.headers;
       App.state.lists = d.lists || {};
+      App.state.user = d.user || '';
+      const sess = App.session();
+      if (sess.token && (d.role !== sess.role || d.user !== sess.name)) setSession(Object.assign(sess, { name: d.user, role: d.role }));   // المدير غيّر الصلاحية
       const idx = App.colIndex();
       if (idx.id < 0) throw new Error('عمود NN غير موجود في الشيت');
       App.state.records = d.rows.map(r => App.toRecord(r, idx)).filter(r => r.id); // صف الإجماليات أسفل الجدول ليس له NN
@@ -352,11 +395,12 @@
     }
     if (!rec && !src.recv) f.elements.recv.value = App.iso(App.today());
     App._recalc();
-    $('#dlgTitle').textContent = rec ? `تعديل الشيك ${rec.id}` : 'إضافة شيك جديد';
+    const ro = App.lockForm(f);
+    $('#dlgTitle').textContent = rec ? `${ro ? 'عرض' : 'تعديل'} الشيك ${rec.id}` : 'إضافة شيك جديد';
     $('#dupBtn').classList.toggle('hidden', !rec);
     $('#histBtn').classList.toggle('hidden', !rec);
     dlg().showModal();
-    (rec ? f.elements.status : f.elements.code).focus();
+    if (!ro) (rec ? f.elements.status : f.elements.code).focus();
   };
 
   function readForm() {
@@ -453,28 +497,49 @@
     }
   }
 
-  function openSettings() {
-    const s = App.settings();
-    $('#sUser').value = s.user; $('#sUrl').value = s.url; $('#sKey').value = s.key; $('#sMsg').textContent = '';
+  function openSettings(msg) {
+    const s = App.session();
+    $('#sUrlWrap').classList.toggle('hidden', !!App.API_URL);
+    $('#sUrl').required = !App.API_URL;
+    $('#sUrl').value = App.settings().url;
+    $('#sUser').value = s.username || store.get('checks.lastUser'); $('#sPass').value = '';
+    $('#sMsg').textContent = typeof msg === 'string' ? '⚠ ' + msg : ''; $('#sMsg').className = 'small err';
+    showWho();
     $('#appVersion').textContent = `إصدار الموقع: ${App.VERSION}`;
-    showBackupInfo();
-    $('#settingsDlg').showModal();
-    (s.user ? $('#sUrl') : $('#sUser')).focus();
+    if (s.token) showBackupInfo(); else $('#backupInfo').textContent = '';
+    const d = $('#settingsDlg');
+    if (!d.open) d.showModal();
+    (!App.settings().url ? $('#sUrl') : $('#sUser').value ? $('#sPass') : $('#sUser')).focus();
   }
+  App.openSettings = openSettings;
   async function saveSettings(ev) {
     ev.preventDefault();
-    const user = $('#sUser').value.trim();
-    if (!user) { $('#sMsg').textContent = 'اكتب اسم الموظف'; $('#sMsg').className = 'small err'; $('#sUser').focus(); return; }
-    store.set('checks.user', user);
-    store.set('checks.apiUrl', $('#sUrl').value.trim());
-    store.set('checks.apiKey', $('#sKey').value.trim());
-    const m = $('#sMsg'); m.textContent = 'جاري الاختبار…'; m.className = 'small';
+    if (!App.API_URL) store.set('checks.apiUrl', $('#sUrl').value.trim());
+    const m = $('#sMsg'); m.textContent = 'جاري الدخول…'; m.className = 'small';
+    const old = App.settings().token;
     try {
-      await App.api('list');
-      m.textContent = 'تم الاتصال ✓'; m.className = 'small ok';
+      const d = await App.api('login', { username: $('#sUser').value.trim(), password: $('#sPass').value });
+      if (old && old !== d.token) App.api('logout', { token: old }).catch(() => { });
+      setSession({ token: d.token, name: d.name, role: d.role, username: d.username });
+      $('#sPass').value = '';
+      showWho();
+      m.textContent = '✓ أهلاً ' + d.name; m.className = 'small ok';
       setTimeout(() => $('#settingsDlg').close(), 500);
       App.load();
-    } catch (e) { m.textContent = '⚠ ' + e.message; m.className = 'small err'; }
+    } catch (e) { m.textContent = '⚠ ' + e.message; m.className = 'small err'; $('#sPass').select(); }
+  }
+  async function logout() {
+    const t = App.settings().token;
+    setSession(null);
+    App.setStatus('خرجت من الحساب — سجّل دخول تاني علشان تشوف البيانات.');
+    if (t) App.api('logout', { token: t }).catch(() => { });
+    openSettings();
+  }
+  // مين داخل دلوقتي (عرض بس — الاسم والصلاحية من السيرفر)
+  function showWho() {
+    const s = App.session(), el = $('#sWho');
+    el.innerHTML = s.token ? `👤 داخل باسم: <b>${esc(s.name)}</b> — الصلاحية: <b>${esc(s.role)}</b>` : '🔒 سجّل دخول باسم المستخدم وكلمة السر اللي أخدتهم من المدير';
+    el.className = 'small ' + (s.token ? 'ok' : 'muted');
   }
 
   // ===== التنقل =====
@@ -496,7 +561,7 @@
 
   // ===== الجداول على الموبايل =====
   // كل خلية بتاخد اسم عمودها (data-label)، والـ CSS بيعرض الصف ككارت «العمود: القيمة» على الشاشات الصغيرة
-  const CARD_TABLES = '#checksTable, #custTable, #supTable, #supSumTable, #whTable, #whSumTable, #trTable, #dTable';
+  const CARD_TABLES = '#checksTable, #custTable, #supTable, #supSumTable, #whTable, #whSumTable, #trTable, #dTable, .review-table';
   function labelCells() {
     document.querySelectorAll(CARD_TABLES).forEach(t => {
       t.classList.add('cards');
@@ -530,6 +595,8 @@
     document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
     $('#settingsBtn').addEventListener('click', openSettings);
     $('#settingsForm').addEventListener('submit', saveSettings);
+    $('#logoutBtn').addEventListener('click', logout);
+    showUser();
     $('#reloadBtn').addEventListener('click', App.load);
     window.addEventListener('hashchange', App.render);
     $('#status').addEventListener('click', e => {
@@ -547,11 +614,9 @@
     });
     Object.values(App.views).forEach(v => v.init && v.init());
     App.render();
-    if (App.settings().url) {
-      App.load();
-      if (!App.settings().user) openSettings();   // الأجهزة اللي اتظبطت قبل سجل التعديلات
-    } else {
-      App.setStatus('مرحباً 👋 — لربط الموقع بالشيت اضغط <b>⚙ الإعدادات</b> وأدخل رابط Apps Script ورمز الدخول (الخطوات في README.md).');
+    if (App.settings().url && App.settings().token) App.load();
+    else {
+      App.setStatus('مرحباً 👋 — سجّل دخول باسم المستخدم وكلمة السر علشان تشوف البيانات (الخطوات في README.md).');
       openSettings();
     }
   });

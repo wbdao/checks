@@ -1,7 +1,7 @@
 // بيئة Google Apps Script وهمية لتشغيل apps-script/Code.gs على Node من غير ما ننشر حاجة.
 // فيها شيتات في الذاكرة (قيم + معادلات + إدراج صفوف) وكل الخدمات اللي Code.gs بيستخدمها.
 'use strict';
-const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert');
+const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert'), crypto = require('crypto');
 
 const TZ = 'Africa/Cairo';
 const CODE = process.env.CODE_GS || path.join(__dirname, '..', 'apps-script', 'Code.gs');   // CODE_GS: لتجربة نسخة تانية
@@ -24,6 +24,14 @@ const Utilities = {
     const g = Date.UTC(y, m - 1, d);
     return new Date(g - tzOffset(g, tz));
   },
+  // زي GAS: مصفوفة bytes بإشارة (-128..127)
+  computeDigest(alg, s, charset) {
+    assert.strictEqual(alg, 'SHA_256'); assert.strictEqual(charset, 'UTF_8');
+    return [...crypto.createHash('sha256').update(String(s), 'utf8').digest()].map(b => (b > 127 ? b - 256 : b));
+  },
+  DigestAlgorithm: { SHA_256: 'SHA_256' },
+  Charset: { UTF_8: 'UTF_8' },
+  getUuid: () => crypto.randomUUID(),
 };
 const date = s => Utilities.parseDate(s, TZ);
 
@@ -66,6 +74,8 @@ function makeWorld(fixtures, opts = {}) {
     }
     getRange(r, c, nr = 1, nc = 1) { return new Range(this, r, c, nr, nc); }
     getMaxRows() { return this.rows.length; }
+    getMaxColumns() { return this.cols; }
+    insertColumnsAfter(c, n) { assert.strictEqual(c, this.cols, 'الفيك بيدعم الإضافة في الآخر بس'); this.cols += n; this.rows.forEach(r => { for (let i = 0; i < n; i++) r.push(''); }); }
     getLastRow() { for (let i = this.rows.length - 1; i >= 0; i--) if (this.rows[i].some(v => v !== '' && v !== null)) return i + 1; return 0; }
     getLastColumn() { let m = 0; this.rows.forEach(r => r.forEach((v, j) => { if (v !== '' && v !== null && j + 1 > m) m = j + 1; })); return m; }
     getDataRange() { return this.getRange(1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
@@ -140,7 +150,7 @@ function makeWorld(fixtures, opts = {}) {
       tryLock: () => !ctx.lockBusy, waitLock: () => { if (ctx.lockBusy) throw new Error('Lock timeout'); },
       releaseLock() { ctx.lockReleased = (ctx.lockReleased || 0) + 1; },
     }) },
-    CacheService: { getScriptCache: () => ({ get: k => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = v; } }) },
+    CacheService: { getScriptCache: () => ({ get: k => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; } }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ s, setMimeType() { return this; } }) },
     DriveApp, ScriptApp,
     Logger: { log() { } },
@@ -181,13 +191,21 @@ function fixtures({ whHeaderRow = 2 } = {}) {
   };
 }
 
-// تحميل Code.gs في البيئة الوهمية. secret: null = سيب الـ SECRET زي ما هو في الملف
+// تحميل Code.gs في البيئة الوهمية. secret: null = سيب الـ SECRET زي ما هو في الملف.
+// api(body) بيبعت طلب بتوكن دخول المدير الاحتياطي (admin + SECRET) — إلا لو body فيه token.
+// api.raw(body) = طلب من غير توكن، و api.as(token) = طلبات بتوكن معيّن
 function load(world, { secret = 'test-key', file = CODE } = {}) {
   let src = fs.readFileSync(file, 'utf8');
   if (secret !== null) src = src.replace(/const SECRET = '[^']*'/, `const SECRET = '${secret}'`);
   vm.createContext(world.ctx);
   vm.runInContext(src, world.ctx, { filename: file });
-  return body => JSON.parse(world.ctx.doPost({ postData: { contents: JSON.stringify(Object.assign({ key: secret || '' }, body)) } }).s);
+  const raw = body => JSON.parse(world.ctx.doPost({ postData: { contents: JSON.stringify(body) } }).s);
+  const token = secret !== null ? raw({ action: 'login', username: 'admin', password: secret }).token : undefined;
+  const api = body => raw(Object.assign({ token }, body));
+  api.raw = raw;
+  api.token = token;
+  api.as = t => body => raw(Object.assign({ token: t }, body));
+  return api;
 }
 
 module.exports = { TZ, Utilities, date, makeWorld, fixtures, load, MAIN_H, WH_H };

@@ -281,11 +281,12 @@
     for (const [, fields] of FORM) for (const [k, type] of fields) el(k).value = asInput(k, type, src);
     if (!rec) { if (!src.recv) el('recv').value = App.iso(App.today()); if (!src.state) el('state').value = 'NN'; }
     recalcForm();
-    $('#whDlgTitle').textContent = rec ? `تعديل ${rec.whId || 'شيك'} — رقم الشيك ${rec.checkNo}${rec.whId ? '' : ` (صف ${rec._rowNum})`}` : 'إضافة شيك — شيكات المخازن (الكود هيتولد تلقائياً)';
+    const ro = App.lockForm(f);
+    $('#whDlgTitle').textContent = rec ? `${ro ? 'عرض' : 'تعديل'} ${rec.whId || 'شيك'} — رقم الشيك ${rec.checkNo}${rec.whId ? '' : ` (صف ${rec._rowNum})`}` : 'إضافة شيك — شيكات المخازن (الكود هيتولد تلقائياً)';
     $('#whDupBtn').classList.toggle('hidden', !rec);
     $('#whHistBtn').classList.toggle('hidden', !(rec && rec.whId));
     $('#whDlg').showModal();
-    (rec ? el('state') : el('code')).focus();
+    if (!ro) (rec ? el('state') : el('code')).focus();
   }
 
   function readForm() {

@@ -1,13 +1,14 @@
 /**
  * واجهة برمجية لشيت الشيكات — تُنشر كـ Web App من داخل الشيت (Extensions > Apps Script).
- * كل الطلبات POST بجسم JSON نصي: { action, key, ... }
+ * كل الطلبات POST بجسم JSON نصي: { action, token, ... } — token من login { username, password } (المستخدمين في شيت «الموظفين»)
  *   list   → يرجع رؤوس الأعمدة وكل الصفوف + قوائم الاختيار من شيت "معاملات"
  *   add    → يضيف شيك جديد (يولّد NN تلقائياً ويكتب معادلات الأعمدة المحسوبة)
  *   update → يعدّل شيك موجود بالـ NN
  */
 
 // ===== الإعدادات =====
-const SECRET = 'غيّر-هذا-الرمز';          // نفس الرمز يُكتب في إعدادات الموقع
+// SECRET = كلمة سر الدخول الاحتياطي للمدير (اسم المستخدم admin) — التعديلات بيه بتتسجل باسم «المدير»
+const SECRET = 'غيّر-هذا-الرمز';
 const DATA_SHEET = 'الشيكات (2)';
 const LISTS_SHEET = 'معاملات';
 const ID_HEADER = 'NN';
@@ -21,7 +22,12 @@ const FORMULAS = {
   'العام': '=+YEAR({تاريخ الاستحقاق}{r})',
   'حالة الشيك': '=IF({تاريخ الاستحقاق}{r}<=TODAY(),"مستحق","تحت التحصيل")',
 };
-const DATE_HEADERS = ['تاريخ الاستلام', 'تاريخ الاستحقاق', 'تاريخ خروج الشيك'];
+const DATE_HEADERS = ['تاريخ الاستلام', 'تاريخ الاستحقاق', 'تاريخ خروج الشيك', 'تاريخ التحصيل'];
+// تاريخ التحصيل (عمود اختياري): لما «الحاله» تتغير لـ «خالص» من الموقع وخانة التاريخ فاضية بيتكتب تاريخ النهارده.
+// عمره ما بيكتب فوق تاريخ موجود، ولو العمود مش موجود في الشيت مفيش حاجة بتحصل
+const STATUS_HEADER = 'الحاله';
+const PAID_STATUS = 'خالص';
+const PAID_DATE = 'تاريخ التحصيل';
 const NUMBER_HEADERS = ['قيمة الشيك', 'دفعات شيكات', 'mm'];
 
 // شيت شيكات المخازن — العناوين في الصف الثاني لأن الأول فيه الإجماليات، ولا يوجد عمود ID
@@ -43,17 +49,39 @@ const WH_FORMULAS = {
 // قوائم الاختيار: رقم العمود في شيت "معاملات" (A=1)
 const LISTS = { 'موقف الشيك': 1, 'حالة الصرف': 3, 'الحاله': 4, 'المخزن': 5 };
 
-// سجل التعديلات: كل إجراءات الكتابة لازم يتبعت معاها user (اسم الموظف)، وبيتسجل صف لكل خانة اتغيرت
+// المستخدمين (شيت «الموظفين»): اسم مستخدم + اسم + صلاحية + مفعّل + كلمة السر (hash + salt، عمرها ما بتتخزن صريحة).
+// الشيت بيتعمل لوحده، والمستخدمين بيتضافوا من شاشة «المستخدمين» في الموقع (كلمة السر لازم تتعمل من هناك).
+// الجدول بيتحفظ في الكاش EMP_TTL ثانية، وأي تعديل في الشيت (onEdit أو من الموقع) بيمسح الكاش فوراً
+const EMP_SHEET = 'الموظفين';
+const EMP_HEADERS = ['اسم المستخدم', 'الاسم', 'الصلاحية', 'مفعّل', 'كلمة السر (مشفرة)', 'Salt'];
+const EMP_TTL = 5 * 60;
+const EMP_CACHE = 'emp:v2';
+const ADMIN_NAME = 'المدير';             // الدخول الاحتياطي: اسم المستخدم admin + كلمة السر = SECRET
+const BREAK_GLASS = '*admin*';
+const ROLE_VIEW = 'مشاهدة', ROLE_EDIT = 'تعديل', ROLE_ADMIN = 'مدير';
+const ROLES = [ROLE_VIEW, ROLE_EDIT, ROLE_ADMIN];
+const READ_ACTIONS = ['list', 'listWh', 'history', 'payments', 'backupInfo'];   // لأي صلاحية — أي إجراء تاني محتاج «تعديل» على الأقل
+const ADMIN_ACTIONS = ['users', 'userSave'];
+const SESSION_MAX = 12 * 60 * 60;       // الدخول بيفضل شغال 12 ساعة بالكتير
+const SESSION_REFRESH = 10 * 60;        // بنجدد مدة الكاش مع الاستخدام كل 10 دقايق
+const CACHE_MAX = 6 * 60 * 60;          // أقصى مدة في CacheService
+const HASH_ROUNDS = 300;
+const MIN_PASS = 8;
+const MAX_FAILS = 5, LOCK_MIN = 15;     // 5 محاولات غلط لنفس اسم المستخدم = قفل 15 دقيقة
+const LOGIN_NEEDED = 'لازم تسجّل دخول (أو الدخول انتهى) — سجّل دخول تاني';
+const EMP_YES = ['true', 'نعم', 'اه', 'آه', 'ايوه', 'أيوه', 'مفعل', 'مفعّل', '✓', '✔', '1', 'yes', 'y'];
+
+// سجل التعديلات: الاسم بييجي من جلسة الدخول (مش من الموقع)، وبيتسجل صف لكل خانة اتغيرت
 // (وصف لكل شيك جديد) في شيت «سجل التعديلات» — بيتعمل لوحده لو مش موجود. history → سجل شيك واحد بالـ NN أو WH
 const LOG_SHEET = 'سجل التعديلات';
 const LOG_HEADERS = ['الوقت', 'الموظف', 'العملية', 'الشيت', 'كود الشيك', 'العمود', 'القيمة القديمة', 'القيمة الجديدة'];
-const LOG_MAIN = 'الشيكات', LOG_WH = 'شيكات المخازن';
+const LOG_MAIN = 'الشيكات', LOG_WH = 'شيكات المخازن', LOG_USERS = 'المستخدمين';
 const WRITE_ACTIONS = {
   add: 'إضافة', addMany: 'إدراج من جدول', update: 'تعديل', updateMany: 'تعديل جماعي',
-  whAdd: 'إضافة', whUpdate: 'تعديل', whFillIds: 'إعطاء أكواد WH',
+  whAdd: 'إضافة', whUpdate: 'تعديل', whFillIds: 'إعطاء أكواد WH', userSave: 'مستخدمين',
 };
 const NEW_CHECK = '(شيك جديد)';
-const NEW_SUMMARY = ['كود العميل', 'اسم العميل سيستم', 'اسم العميل', 'رقم الشيك', 'البنك', 'قيمة الشيك', 'تاريخ الاستحقاق'];
+const NEW_SUMMARY = ['كود العميل', 'اسم العميل سيستم', 'اسم العميل', 'رقم الشيك', 'البنك', 'قيمة الشيك', 'تاريخ الاستحقاق', 'الحاله', 'تاريخ التحصيل'];
 // منع التكرار: كل طلب كتابة من الموقع معاه rid (رقم مميز). لو نفس الـ rid رجع تاني خلال 6 ساعات
 // (النت فصل والموظف داس حفظ تاني) بيرجع نفس النتيجة القديمة من غير ما يكتب تاني
 const RID_TTL = 6 * 60 * 60;           // بالثواني (أقصى مدة في CacheService)
@@ -73,14 +101,20 @@ function doPost(e) {
   let out;
   try {
     const req = JSON.parse(e.postData.contents || '{}');
-    if (SECRET === 'غيّر-هذا-الرمز') throw new Error('غيّر SECRET في السطر 10 من Code.gs قبل الاستخدام');
-    if (req.key !== SECRET) throw new Error('رمز الدخول غير صحيح');
-    if (WRITE_ACTIONS[req.action]) {
-      req.user = String(req.user || '').trim().slice(0, 60);
-      if (!req.user) throw new Error('اكتب اسمك في ⚙ الإعدادات (اسم الموظف) علشان التعديل يتسجل باسمك — لو الخانة مش ظاهرة اضغط Ctrl+F5');
+    if (SECRET === 'غيّر-هذا-الرمز') throw new Error('غيّر SECRET في أول Code.gs (سطر const SECRET) قبل الاستخدام');
+    if (req.action === 'login') return json_(Object.assign(login_(req), { ok: true }));
+    if (req.action === 'logout') return json_(Object.assign(logout_(req.token), { ok: true }));
+    const who = session_(req.token);
+    req.user = who.name;   // اسم السجل من الجلسة — أي user جاي من الموقع بيتجاهل
+    const need = ADMIN_ACTIONS.indexOf(req.action) >= 0 ? ROLE_ADMIN : READ_ACTIONS.indexOf(req.action) >= 0 ? ROLE_VIEW : ROLE_EDIT;
+    if (ROLES.indexOf(who.role) < ROLES.indexOf(need)) {
+      throw new Error(need === ROLE_ADMIN ? 'الإجراء ده للمدير بس' : 'صلاحيتك «' + who.role + '» — مش مسموحلك تضيف أو تعدّل. كلّم المدير');
     }
-    if (req.action === 'list') out = list_();
+    if (req.action === 'list') { out = list_(); out.user = who.name; out.role = who.role; out.username = who.username === BREAK_GLASS ? 'admin' : who.username; }
+    else if (req.action === 'users') out = usersList_();
+    else if (req.action === 'userSave') out = withLock_(req, () => userSave_(req, who));
     else if (req.action === 'history') out = history_(req.id);
+    else if (req.action === 'payments') out = payments_();
     else if (req.action === 'add') out = withLock_(req, () => { const r = addMany_([req.record]); return { id: r.ids[0], row: r.rows[0] }; });
     else if (req.action === 'addMany') out = withLock_(req, () => addMany_(req.records));
     else if (req.action === 'update') out = withLock_(req, () => update_(req.id, req.record));
@@ -94,13 +128,216 @@ function doPost(e) {
     out.ok = true;
   } catch (err) {
     out = { ok: false, error: String(err.message || err) };
+    if (err && err.login) out.login = true;
   }
-  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+  return json_(out);
 }
+function json_(out) { return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON); }
 
 function doGet() {
   return ContentService.createTextOutput(JSON.stringify({ ok: true, msg: 'Checks API يعمل — استخدم POST' }))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ===== الدخول: اسم مستخدم + كلمة سر لكل موظف =====
+// login → توكن عشوائي في CacheService. كل طلب بعد كده بيبعت token، والسيرفر بيعرف منه الاسم والصلاحية
+// (من شيت «الموظفين» وقت الطلب — فإيقاف موظف أو تغيير صلاحيته بيشتغل فوراً)
+function session_(token) {
+  token = String(token || '').trim();
+  if (!token) throw loginErr_(LOGIN_NEEDED);
+  const cache = CacheService.getScriptCache();
+  const key = 'sess:' + token;
+  let s = null;
+  try { s = JSON.parse(cache.get(key) || 'null'); } catch (e) { s = null; }
+  const now = Date.now();
+  if (!s || !(s.exp > now)) { try { cache.remove(key); } catch (e) { } throw loginErr_(LOGIN_NEEDED); }
+  let who;
+  if (s.u === BREAK_GLASS) {
+    if (s.sv !== secretTag_()) { cache.remove(key); throw loginErr_(LOGIN_NEEDED); }   // SECRET اتغير
+    who = { username: BREAK_GLASS, name: ADMIN_NAME, role: ROLE_ADMIN };
+  } else {
+    const us = users_();
+    const u = Object.prototype.hasOwnProperty.call(us, s.u) ? us[s.u] : null;
+    if (!u || !u.active) { cache.remove(key); throw loginErr_('حسابك اتوقف أو اتشال — كلّم المدير'); }
+    who = { username: normUser_(u.username), name: u.name, role: u.role };
+  }
+  // تجديد مع الاستخدام (الكاش حده 6 ساعات) — بحد أقصى SESSION_MAX من وقت الدخول
+  if (now - (s.t || 0) > SESSION_REFRESH * 1000) {
+    s.t = now;
+    try { cache.put(key, JSON.stringify(s), Math.max(1, Math.min(CACHE_MAX, Math.ceil((s.exp - now) / 1000)))); } catch (e) { }
+  }
+  return who;
+}
+
+function login_(req) {
+  const uname = normUser_(req.username);
+  const pass = String(req.password || '');
+  if (!uname || !pass) throw new Error('اكتب اسم المستخدم وكلمة السر');
+  const cache = CacheService.getScriptCache();
+  const failKey = 'fail:' + uname, lockKey = 'lock:' + uname;
+  if (cache.get(lockKey)) throw new Error('الحساب ده مقفول ' + LOCK_MIN + ' دقيقة بسبب محاولات غلط كتير — استنى وحاول تاني، أو كلّم المدير');
+  let who = null;
+  if ((uname === 'admin' || uname === normUser_(ADMIN_NAME)) && pass === SECRET) {
+    who = { username: BREAK_GLASS, name: ADMIN_NAME, role: ROLE_ADMIN };
+  } else {
+    const us = users_();
+    const u = Object.prototype.hasOwnProperty.call(us, uname) ? us[uname] : null;
+    if (u && u.hash && u.salt && hashPass_(pass, u.salt) === u.hash) {
+      if (!u.active) throw new Error('الحساب ده متوقف — كلّم المدير');
+      who = { username: uname, name: u.name, role: u.role };
+    }
+  }
+  if (!who) {
+    const n = (parseInt(cache.get(failKey), 10) || 0) + 1;
+    if (n >= MAX_FAILS) {
+      cache.put(lockKey, '1', LOCK_MIN * 60); cache.remove(failKey);
+      throw new Error('محاولات غلط كتير — الحساب اتقفل ' + LOCK_MIN + ' دقيقة');
+    }
+    cache.put(failKey, String(n), LOCK_MIN * 60);
+    throw new Error('اسم المستخدم أو كلمة السر غلط (فاضل ' + (MAX_FAILS - n) + ' محاولات قبل القفل)');
+  }
+  cache.remove(failKey);
+  const token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+  const now = Date.now();
+  const s = { u: who.username, exp: now + SESSION_MAX * 1000, t: now };
+  if (s.u === BREAK_GLASS) s.sv = secretTag_();
+  cache.put('sess:' + token, JSON.stringify(s), CACHE_MAX);
+  return { token, name: who.name, role: who.role, username: who.username === BREAK_GLASS ? 'admin' : who.username };
+}
+
+function logout_(token) {
+  token = String(token || '').trim();
+  if (token) CacheService.getScriptCache().remove('sess:' + token);
+  return {};
+}
+
+function loginErr_(msg) { const e = new Error(msg); e.login = true; return e; }   // الموقع بيفتح شاشة الدخول
+const normUser_ = u => String(u || '').trim().toLowerCase();
+const hex_ = bytes => bytes.map(b => ('0' + ((b + 256) % 256).toString(16)).slice(-2)).join('');
+const sha_ = s => hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8));
+// SHA-256 مكرر HASH_ROUNDS مرة بـ salt مختلف لكل مستخدم
+function hashPass_(pass, salt) {
+  let h = sha_(salt + ':' + pass);
+  for (let i = 0; i < HASH_ROUNDS; i++) h = sha_(h + salt);
+  return h;
+}
+function secretTag_() { return sha_('secret:' + SECRET).slice(0, 12); }
+
+// { اسم المستخدم (حروف صغيرة): { username, name, role, active, hash, salt, row } } — من الكاش أو الشيت
+function users_() {
+  const cache = CacheService.getScriptCache();
+  try { const hit = cache.get(EMP_CACHE); if (hit) return JSON.parse(hit); } catch (e) { /* نقرا الشيت */ }
+  const sh = empSheet_();
+  const c = empCols_(sh);
+  const vals = sh.getDataRange().getValues();
+  const out = Object.create(null);
+  vals.slice(1).forEach((r, i) => {
+    const username = String(r[c.user - 1] === undefined ? '' : r[c.user - 1]).trim();
+    const k = normUser_(username);
+    if (!k || out[k]) return;   // أول صف بالاسم ده هو اللي بيتحسب
+    const role = String(r[c.role - 1] === undefined ? '' : r[c.role - 1]).trim();
+    const cell = col => String(r[col - 1] === undefined ? '' : r[col - 1]).trim();
+    out[k] = {
+      username, name: cell(c.name).slice(0, 60) || username,
+      role: ROLES.indexOf(role) >= 0 ? role : ROLE_VIEW,
+      active: EMP_YES.indexOf(cell(c.active).toLowerCase()) >= 0,
+      hash: cell(c.hash), salt: cell(c.salt), row: i + 2,
+    };
+  });
+  try { cache.put(EMP_CACHE, JSON.stringify(out), EMP_TTL); } catch (e) { /* الكاش اختياري */ }
+  return out;
+}
+
+function empSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(EMP_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(EMP_SHEET);
+    sh.getRange(1, 1, 1, EMP_HEADERS.length).setValues([EMP_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// أرقام الأعمدة بالعناوين — أي عنوان ناقص (شيت قديم) بيتضاف في آخر الصف الأول
+function empCols_(sh) {
+  const map = sh.getLastColumn() ? headerMap_(sh) : {};
+  const missing = EMP_HEADERS.filter(h => !map[h]);
+  if (missing.length) {
+    const start = sh.getLastColumn() + 1;
+    const extra = start + missing.length - 1 - sh.getMaxColumns();
+    if (extra > 0) sh.insertColumnsAfter(sh.getMaxColumns(), extra);
+    sh.getRange(1, start, 1, missing.length).setValues([missing]).setFontWeight('bold');
+    missing.forEach((h, i) => { map[h] = start + i; });
+  }
+  return { user: map[EMP_HEADERS[0]], name: map[EMP_HEADERS[1]], role: map[EMP_HEADERS[2]], active: map[EMP_HEADERS[3]], hash: map[EMP_HEADERS[4]], salt: map[EMP_HEADERS[5]] };
+}
+
+// ===== إدارة المستخدمين (مدير بس) =====
+// عمرها ما بترجع كلمة السر ولا الـ hash
+function usersList_() {
+  const us = users_();
+  return { users: Object.keys(us).map(k => ({ username: us[k].username, name: us[k].name, role: us[k].role, active: us[k].active, hasPassword: !!us[k].hash })) };
+}
+
+// إضافة أو تعديل مستخدم: { username, name?, role?, active?, password? } — password = تعيين/إعادة تعيين كلمة السر
+function userSave_(req, who) {
+  const username = String(req.username || '').trim();
+  const k = normUser_(username);
+  if (!/^[a-z0-9._-]{3,30}$/.test(k)) throw new Error('اسم المستخدم لازم يكون من 3 لـ 30 حرف إنجليزي أو رقم (ومسموح . _ -) من غير مسافات');
+  if (k === 'admin') throw new Error('اسم المستخدم admin محجوز للدخول الاحتياطي — اختار اسم تاني');
+  if (req.role !== undefined && ROLES.indexOf(req.role) < 0) throw new Error('الصلاحية لازم تكون: ' + ROLES.join(' / '));
+  const pass = req.password === undefined || req.password === null ? '' : String(req.password);
+  if (pass && pass.length < MIN_PASS) throw new Error('كلمة السر لازم تكون ' + MIN_PASS + ' حروف على الأقل');
+  if (k === who.username && (req.active === false || (req.role !== undefined && req.role !== ROLE_ADMIN))) {
+    throw new Error('مينفعش توقف حسابك أو تشيل صلاحية المدير من نفسك — خلّي مدير تاني يعملها');
+  }
+  const sh = empSheet_();
+  const c = empCols_(sh);
+  CacheService.getScriptCache().remove(EMP_CACHE);
+  const us = users_();
+  const existing = Object.prototype.hasOwnProperty.call(us, k) ? us[k] : null;
+  const width = Math.max.apply(null, Object.keys(c).map(x => c[x]));
+  let row, before;
+  if (existing) {
+    row = existing.row;
+    before = sh.getRange(row, 1, 1, width).getValues()[0];
+  } else {
+    if (!pass) throw new Error('مستخدم جديد محتاج كلمة سر');
+    row = Math.max(sh.getLastRow(), 1) + 1;
+    if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 1);
+    before = new Array(width).fill('');
+  }
+  const after = before.slice();
+  after[c.user - 1] = existing ? before[c.user - 1] : username;
+  if (req.name !== undefined || !existing) after[c.name - 1] = String(req.name || username).trim().slice(0, 60);
+  if (req.role !== undefined || !existing) after[c.role - 1] = req.role || ROLE_VIEW;
+  if (req.active !== undefined || !existing) after[c.active - 1] = req.active !== false;
+  if (pass) {
+    const salt = Utilities.getUuid().replace(/-/g, '');
+    after[c.salt - 1] = salt;
+    after[c.hash - 1] = hashPass_(pass, salt);
+  }
+  // السجل: كل خانة اتغيرت (كلمة السر بتتسجل «اتغيرت» بس، من غير قيمتها)
+  const id = String(after[c.user - 1]);
+  if (!existing) audit_(LOG_USERS, id, '(مستخدم جديد)', '', 'الاسم: ' + after[c.name - 1] + ' • الصلاحية: ' + after[c.role - 1]);
+  else {
+    [['name', 'الاسم'], ['role', 'الصلاحية'], ['active', 'مفعّل']].forEach(([f, label]) => {
+      const o = String(before[c[f] - 1]), n = String(after[c[f] - 1]);
+      if (o !== n) audit_(LOG_USERS, id, label, o, n);
+    });
+  }
+  if (pass) audit_(LOG_USERS, id, 'كلمة السر', '', existing ? '(اتغيرت)' : '(اتعملت)');
+  sh.getRange(row, 1, 1, width).setValues([after]);
+  CacheService.getScriptCache().remove(EMP_CACHE);
+  return usersList_();
+}
+
+// أي تعديل يدوي في شيت «الموظفين» (إيقاف موظف/تغيير صلاحية) بيشتغل فوراً من غير ما نستنى الكاش
+function onEdit(e) {
+  try {
+    if (e && e.range && e.range.getSheet().getName() === EMP_SHEET) CacheService.getScriptCache().remove(EMP_CACHE);
+  } catch (err) { /* مش مهم */ }
 }
 
 // ===== القراءة =====
@@ -171,6 +408,7 @@ function addMany_(records) {
   extendTotals_(sh, last + n + 1, last, last + n);
 
   const ids = [];
+  records = records.map(record => stampPaid_(map, Object.assign({}, record), null));
   const values = records.map((record, i) => {
     const id = ID_PREFIX + String(max + 1 + i).padStart(ID_DIGITS, '0');
     ids.push(id);
@@ -223,6 +461,7 @@ function update_(id, record) {
   const rec = Object.assign({}, record);
   delete rec[ID_HEADER];
   const before = sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0];
+  stampPaid_(map, rec, before);
   writeRecord_(sh, map, row, rec, null, null, { sheet: LOG_MAIN, id, before });
   return { id, row: readRow_(sh, map, row) };
 }
@@ -249,6 +488,7 @@ function updateMany_(updates) {
   updates.forEach(u => {
     const rec = Object.assign({}, u.record);
     delete rec[ID_HEADER];
+    stampPaid_(map, rec, before[rowOf[u.id] - 1]);
     writeRecord_(sh, map, rowOf[u.id], rec, null, null, { sheet: LOG_MAIN, id: u.id, before: before[rowOf[u.id] - 1] });
   });
   SpreadsheetApp.flush();
@@ -274,6 +514,23 @@ function writeRecord_(sh, map, row, rec, formulas, numbers, log) {
     }
     sh.getRange(row, col).setValue(v);
   });
+}
+
+// «الحاله» اتغيرت لـ «خالص» وخانة «تاريخ التحصيل» فاضية → نضيف تاريخ النهارده للـ rec (فبيتكتب ويتسجل
+// في السجل زي أي خانة). before = الصف قبل الكتابة (null لشيك جديد). لو العمود مش موجود، أو الحاله كانت
+// خالص أصلاً، أو فيه تاريخ في الشيت أو في الطلب — مفيش تغيير
+function stampPaid_(map, rec, before) {
+  const dCol = map[PAID_DATE], sCol = map[STATUS_HEADER];
+  if (!dCol || !sCol) return rec;
+  const keys = Object.keys(rec);
+  const sk = keys.filter(h => h.trim() === STATUS_HEADER)[0];
+  if (sk === undefined || String(rec[sk]).trim() !== PAID_STATUS) return rec;
+  if (keys.some(h => h.trim() === PAID_DATE && String(rec[h] == null ? '' : rec[h]).trim() !== '')) return rec;
+  if (before && String(before[sCol - 1]).trim() === PAID_STATUS) return rec;
+  if (before && before[dCol - 1] !== '' && before[dCol - 1] !== null) return rec;
+  keys.filter(h => h.trim() === PAID_DATE).forEach(h => delete rec[h]);
+  rec[PAID_DATE] = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd');
+  return rec;
 }
 
 // تحويل القيم: التواريخ yyyy-MM-dd إلى Date، والأرقام إلى Number
@@ -592,6 +849,103 @@ function backupInfo_() {
     last: files.length ? Utilities.formatDate(files[0].getDateCreated(), tz, 'yyyy-MM-dd HH:mm') : '',
     folderUrl: folder ? folder.getUrl() : '',
   };
+}
+
+// ===== دفعات الشيكات (من سجل التعديلات) =====
+// كل زيادة في «دفعات شيكات» في السجل = دفعة بالفرق في يوم التعديل. النقص مش دفعة: ده تصحيح بيلغي آخر دفعات
+// اتكتبت زيادة (من الأحدث للأقدم) لحد ما المجموع ينزل بنفس الفرق. الدفعة الأخيرة (الباقي لما الحاله تبقى خالص)
+// مش هنا — الموقع بيحسبها من «تاريخ التحصيل»: قيمة الشيك − دفعات شيكات
+const PAY_HEADER = 'دفعات شيكات';
+const PAY_TTL = 10 * 60;               // مفتاح الكاش فيه عدد صفوف السجل، فأي تعديل جديد بيتقري من الأول
+
+// صفوف السجل → { NN: [[yyyy-MM-dd, مبلغ], …] } — بس الشيكات اللي ليها دفعات
+function paymentsFromLog_(vals, tz) {
+  const num = v => { const s = String(v == null ? '' : v).replace(/,/g, '').trim(); return s === '' ? 0 : Number(s); };
+  const out = {};
+  vals.forEach(r => {
+    if (String(r[3]).trim() !== LOG_MAIN || String(r[5]).trim() !== PAY_HEADER) return;
+    const id = String(r[4]).trim();
+    const at = r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'yyyy-MM-dd') : String(r[0]).trim().slice(0, 10);
+    const oldV = num(r[6]), newV = num(r[7]);
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(at) || isNaN(oldV) || isNaN(newV) || newV === oldV) return;
+    const list = out[id] || (out[id] = []);
+    if (newV > oldV) { list.push([at, Math.round((newV - oldV) * 100) / 100]); return; }
+    let cut = oldV - newV;
+    while (cut > 0.005 && list.length) {
+      const p = list[list.length - 1];
+      if (p[1] <= cut + 0.005) { cut -= p[1]; list.pop(); } else { p[1] = Math.round((p[1] - cut) * 100) / 100; cut = 0; }
+    }
+  });
+  Object.keys(out).forEach(id => { if (!out[id].length) delete out[id]; });
+  return out;
+}
+
+// للموقع: { map: { NN: [[تاريخ, مبلغ], …] } } بقراية واحدة للسجل
+function payments_() {
+  const log = SpreadsheetApp.getActive().getSheetByName(LOG_SHEET);
+  if (!log || log.getLastRow() < 2) return { map: {} };
+  const cache = CacheService.getScriptCache(), key = 'pay:v1:' + log.getLastRow();
+  try { const hit = cache.get(key); if (hit) return { map: JSON.parse(hit) }; } catch (e) { /* نقرا السجل */ }
+  const map = paymentsFromLog_(log.getRange(2, 1, log.getLastRow() - 1, LOG_HEADERS.length).getValues(), tz_());
+  try { const txt = JSON.stringify(map); if (txt.length < RID_MAX_CHARS) cache.put(key, txt, PAY_TTL); } catch (e) { /* الكاش اختياري */ }
+  return { map };
+}
+
+// ===== تعبئة «تاريخ التحصيل» للشيكات القديمة =====
+// شغّلها مرة واحدة من المحرر (اختار backfillPaidDates ← Run) بعد ما تضيف عمود «تاريخ التحصيل».
+// كل شيك «خالص» وخانة تاريخه فاضية بياخد أول يوم اتسدد فيه بالكامل حسب «سجل التعديلات»: أول «الحاله ← خالص»،
+// أو أول مرة «دفعات شيكات» وصلت لقيمة الشيك (لو اتسدد بالدفعات) — الأقدم فيهم.
+// الشيكات اللي مالهاش صف في السجل (اتعملت خالص قبل السجل أو من الشيت بإيدك) بتفضل فاضية (مش معروف).
+// مش بتكتب فوق أي تاريخ موجود، وتشغيلها مرتين ما بيغيرش حاجة
+function backfillPaidDates() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  AUDIT_ = [];
+  try {
+    const tz = tz_();
+    const sh = sheet_();
+    const map = headerMap_(sh);
+    const dCol = map[PAID_DATE], sCol = map[STATUS_HEADER], idCol = map[ID_HEADER], aCol = map['قيمة الشيك'];
+    if (!dCol) throw new Error('ضيف عمود «' + PAID_DATE + '» في أول صف في شيت «' + DATA_SHEET + '» الأول');
+    if (!sCol || !idCol) throw new Error('عمود «' + STATUS_HEADER + '» أو «' + ID_HEADER + '» مش موجود');
+
+    // من السجل: أول وقت «الحاله ← خالص»، وكل قيمة جديدة لـ «دفعات شيكات» بوقتها
+    const first = {}, pays = {};
+    const log = SpreadsheetApp.getActive().getSheetByName(LOG_SHEET);
+    if (log && log.getLastRow() > 1) {
+      log.getRange(2, 1, log.getLastRow() - 1, LOG_HEADERS.length).getValues().forEach(r => {
+        if (String(r[3]).trim() !== LOG_MAIN) return;
+        const c = String(r[5]).trim(), id = String(r[4]).trim();
+        const at = r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'yyyy-MM-dd HH:mm:ss') : String(r[0]).trim();
+        if (!id || !/^\d{4}-\d{2}-\d{2}/.test(at)) return;
+        if (c === STATUS_HEADER && String(r[7]).trim() === PAID_STATUS) { if (!first[id] || at < first[id]) first[id] = at; }
+        else if (c === PAY_HEADER) (pays[id] = pays[id] || []).push([at, Number(String(r[7]).replace(/,/g, ''))]);
+      });
+    }
+
+    const last = lastDataRow_(sh, idCol);
+    const out = { filled: 0, unknown: 0, alreadyHad: 0 };
+    if (last < 2) return out;
+    const n = last - 1;
+    const ids = sh.getRange(2, idCol, n, 1).getValues(), st = sh.getRange(2, sCol, n, 1).getValues();
+    const amounts = aCol ? sh.getRange(2, aCol, n, 1).getValues() : null;
+    const dates = sh.getRange(2, dCol, n, 1).getValues();
+    for (let i = 0; i < n; i++) {
+      if (String(st[i][0]).trim() !== PAID_STATUS) continue;
+      if (dates[i][0] !== '' && dates[i][0] !== null) { out.alreadyHad++; continue; }
+      const id = String(ids[i][0]).trim(), amt = amounts ? Number(amounts[i][0]) : 0;
+      let at = first[id];
+      if (amt > 0) (pays[id] || []).forEach(p => { if (p[1] >= amt - 0.005 && (!at || p[0] < at)) at = p[0]; });
+      if (!at) { out.unknown++; continue; }
+      dates[i][0] = Utilities.parseDate(at.slice(0, 10), tz, 'yyyy-MM-dd');
+      audit_(LOG_MAIN, id, PAID_DATE, '', at.slice(0, 10));
+      out.filled++;
+    }
+    if (out.filled) sh.getRange(2, dCol, n, 1).setValues(dates);
+    flushAudit_({ action: 'تعبئة تاريخ التحصيل من السجل', user: '(من محرر Apps Script)' });
+    Logger.log('اتملى %s شيك • %s خالص من غير صف في السجل (فضلوا فاضيين) • %s كان ليهم تاريخ', out.filled, out.unknown, out.alreadyHad);
+    return out;
+  } finally { AUDIT_ = null; lock.releaseLock(); }
 }
 
 // ===== سجل التعديلات =====

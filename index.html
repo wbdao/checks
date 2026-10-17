@@ -7,7 +7,7 @@
 <title>إدارة الشيكات</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="assets/style.css?v=20261017-c4">
+<link rel="stylesheet" href="assets/style.css?v=20261017-c10">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -19,11 +19,15 @@
     <a href="#suppliers" data-view="suppliers">متابعة الموردين</a>
     <a href="#treasury" data-view="treasury">شيكات بالخزنة</a>
     <a href="#warehouses" data-view="warehouses">شيكات المخازن</a>
+    <a href="#review" data-view="review">مراجعة البيانات</a>
   </nav>
   <div class="top-actions">
     <span id="syncInfo" class="muted small"></span>
+    <span id="who" class="who small hidden"></span>
+    <button class="btn ghost hidden" id="usersBtn" title="المستخدمين والصلاحيات (للمدير)" aria-label="المستخدمين">👥<span class="lbl"> المستخدمين</span></button>
     <button class="btn ghost" id="reloadBtn" title="تحديث البيانات من الشيت" aria-label="تحديث">⟳<span class="lbl"> تحديث</span></button>
-    <button class="btn ghost" id="settingsBtn" title="الإعدادات" aria-label="الإعدادات">⚙<span class="lbl"> الإعدادات</span></button>
+    <button class="btn ghost" id="settingsBtn" title="الإعدادات والدخول" aria-label="الإعدادات">⚙<span class="lbl"> الإعدادات</span></button>
+    <button class="btn ghost hidden" id="logoutBtn" title="خروج من الحساب" aria-label="خروج">⎋<span class="lbl"> خروج</span></button>
   </div>
 </header>
 
@@ -131,6 +135,13 @@
       <div class="table-wrap"><table class="grid" id="whTable"><thead></thead><tbody></tbody></table></div>
       <div class="pager" id="whFoot"></div>
     </div>
+  </section>
+
+  <!-- ===== شاشة مراجعة البيانات (قراءة فقط) ===== -->
+  <section id="view-review" class="view hidden">
+    <div class="card filters"><span id="rvSummary" class="small"></span></div>
+    <div class="kpis" id="rvKpis"></div>
+    <div id="rvGroups"></div>
   </section>
 
   <!-- ===== شاشة شيكات بالخزنة ===== -->
@@ -363,28 +374,48 @@
   </form>
 </dialog>
 
-<!-- الإعدادات -->
+<!-- الدخول والإعدادات -->
 <dialog id="settingsDlg" class="dlg narrow">
   <form id="settingsForm" method="dialog">
-    <div class="dlg-head"><h2>الإعدادات</h2><button type="button" class="x" data-close>✕</button></div>
+    <div class="dlg-head"><h2>تسجيل الدخول</h2><button type="button" class="x" data-close>✕</button></div>
     <div class="dlg-body">
-      <label class="field req"><span>اسم الموظف</span>
-        <input id="sUser" type="text" maxlength="60" placeholder="مثلاً: أحمد محمد" autocomplete="off" required></label>
-      <p class="muted small" style="margin-top:-4px">كل إضافة أو تعديل بيتسجل باسمك في شيت «سجل التعديلات».</p>
-      <label class="field"><span>رابط Apps Script (Web App URL)</span>
-        <input id="sUrl" type="url" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" required></label>
-      <label class="field"><span>رمز الدخول (نفس SECRET في Code.gs)</span>
-        <input id="sKey" type="password" dir="ltr" required></label>
-      <p class="muted small">الإعدادات تُحفظ في هذا المتصفح فقط. طريقة التجهيز موضحة في ملف README.md.</p>
+      <label class="field" id="sUrlWrap"><span>رابط Apps Script (Web App URL)</span>
+        <input id="sUrl" type="url" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec"></label>
+      <label class="field req"><span>اسم المستخدم</span>
+        <input id="sUser" type="text" dir="ltr" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
+      <label class="field req"><span>كلمة السر</span>
+        <input id="sPass" type="password" dir="ltr" autocomplete="current-password" required></label>
+      <p id="sWho" class="small muted"></p>
+      <p class="muted small">كل إضافة أو تعديل بيتسجل باسمك في «سجل التعديلات» — ما تدّيش كلمة السر لحد. الدخول بيفضل محفوظ في المتصفح ده لحد 12 ساعة أو لحد ما تضغط «خروج».</p>
       <p class="muted small" id="appVersion"></p>
       <p class="muted small" id="backupInfo"></p>
     </div>
     <div class="dlg-foot">
       <span id="sMsg" class="small"></span><span class="grow"></span>
       <button type="button" class="btn ghost" data-close>إلغاء</button>
-      <button type="submit" class="btn primary">حفظ واتصال</button>
+      <button type="submit" class="btn primary">دخول</button>
     </div>
   </form>
+</dialog>
+
+<!-- المستخدمين (مدير بس) -->
+<dialog id="usersDlg" class="dlg wide">
+  <div class="dlg-head"><h2>المستخدمين والصلاحيات</h2><button type="button" class="x" data-close>✕</button></div>
+  <div class="dlg-body">
+    <p class="muted small">مشاهدة = يشوف بس • تعديل = يشوف ويضيف ويعدّل • مدير = كل حاجة + المستخدمين. التغيير بيشتغل على طول، حتى لو الموظف فاتح الموقع.</p>
+    <div class="table-wrap"><table class="grid" id="usersTable"><thead><tr>
+      <th>اسم المستخدم</th><th>الاسم</th><th>الصلاحية</th><th>مفعّل</th><th>كلمة سر جديدة</th>
+    </tr></thead><tbody></tbody></table></div>
+    <form id="userAddForm" class="user-add">
+      <h3>＋ مستخدم جديد</h3>
+      <label class="field req"><span>اسم المستخدم (إنجليزي)</span><input name="username" dir="ltr" autocomplete="off" autocapitalize="off" spellcheck="false" required pattern="[A-Za-z0-9._\-]{3,30}" placeholder="مثلاً: mona"></label>
+      <label class="field req"><span>الاسم (اللي هيظهر في السجل)</span><input name="name" autocomplete="off" required maxlength="60" placeholder="مثلاً: منى أحمد"></label>
+      <label class="field req"><span>الصلاحية</span><select name="role"><option>مشاهدة</option><option selected>تعديل</option><option>مدير</option></select></label>
+      <label class="field req"><span>كلمة السر (8 حروف على الأقل)</span><input name="password" type="text" dir="ltr" autocomplete="new-password" required minlength="8"></label>
+      <button type="submit" class="btn primary">إضافة</button>
+    </form>
+  </div>
+  <div class="dlg-foot"><span id="usersMsg" class="small"></span><span class="grow"></span><button type="button" class="btn ghost" data-close>إغلاق</button></div>
 </dialog>
 
 <!-- سجل تعديلات شيك (عرض فقط) -->
@@ -396,14 +427,17 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="assets/core.js?v=20261017-c4"></script>
-<script src="assets/share.js?v=20261017-c4"></script>
-<script src="assets/bulk.js?v=20261017-c4"></script>
-<script src="assets/checks.js?v=20261017-c4"></script>
-<script src="assets/customers.js?v=20261017-c4"></script>
-<script src="assets/import.js?v=20261017-c4"></script>
-<script src="assets/suppliers.js?v=20261017-c4"></script>
-<script src="assets/treasury.js?v=20261017-c4"></script>
-<script src="assets/warehouses.js?v=20261017-c4"></script>
+<script src="assets/config.js?v=20261017-c10"></script>
+<script src="assets/core.js?v=20261017-c10"></script>
+<script src="assets/share.js?v=20261017-c10"></script>
+<script src="assets/bulk.js?v=20261017-c10"></script>
+<script src="assets/checks.js?v=20261017-c10"></script>
+<script src="assets/customers.js?v=20261017-c10"></script>
+<script src="assets/import.js?v=20261017-c10"></script>
+<script src="assets/suppliers.js?v=20261017-c10"></script>
+<script src="assets/treasury.js?v=20261017-c10"></script>
+<script src="assets/warehouses.js?v=20261017-c10"></script>
+<script src="assets/review.js?v=20261017-c10"></script>
+<script src="assets/users.js?v=20261017-c10"></script>
 </body>
 </html>

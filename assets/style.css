@@ -129,7 +129,7 @@ table.grid { width: 100%; border-collapse: collapse; }
 .field input[readonly] { background: var(--surface-2); color: var(--muted); }
 .field.req > span::after { content: " *"; color: var(--bad); }
 .field.invalid input { border-color: var(--bad); }
-#formMsg.err, #sMsg.err { color: var(--bad); } #formMsg.warn { color: var(--warn); } #sMsg.ok { color: var(--ok); }
+#formMsg.err, #sMsg.err { color: var(--bad); } #formMsg.warn { color: var(--warn); } #sMsg.ok, #sWho.ok { color: var(--ok); }
 
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #0f172a; color: #fff; padding: 10px 18px; border-radius: 10px; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
 
@@ -339,3 +339,24 @@ body.offline .brand::after { content: " • 📴 مفيش نت"; color: var(--ba
   .fgrid { grid-template-columns: 1fr; }
   .kpi .val { font-size: 15px; }
 }
+
+/* مراجعة البيانات */
+.rv-kpi { text-align: start; font: inherit; color: inherit; cursor: pointer; }
+.rv-kpi:hover { border-color: var(--primary); }
+.rv-group { padding: 12px 14px; margin-bottom: 12px; scroll-margin-top: 80px; }
+.review-table tbody tr { cursor: pointer; }
+.review-table tbody tr:hover { background: var(--primary-weak); }
+
+/* ===== الدخول والصلاحيات ===== */
+.who { white-space: nowrap; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); }
+/* «مشاهدة»: أزرار الإضافة والتعديل مش بتظهر (والسيرفر بيرفض أصلاً) */
+body.ro #addBtn, body.ro #importBtn, body.ro #wAdd, body.ro #wImport, body.ro #dAdd, body.ro #whFillBtn,
+body.ro #saveBtn, body.ro #whSaveBtn, body.ro #dupBtn, body.ro #whDupBtn, body.ro #selEdit, body.ro #bulkSave, body.ro #impSave { display: none !important; }
+#usersTable input:not([type=checkbox]), #usersTable select { width: 100%; min-width: 80px; }
+#usersTable input[data-f=password] { width: 120px; min-width: 0; }
+#usersTable tr.muted td { opacity: .65; }
+.nowrap { white-space: nowrap; }
+#userAddForm.user-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; align-items: end; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+#userAddForm.user-add h3 { grid-column: 1 / -1; margin: 0; font-size: 15px; }
+body.locked main .view { display: none !important; }
+.top-actions .who:not(.hidden) { display: inline-block; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
