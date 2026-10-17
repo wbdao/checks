@@ -49,7 +49,7 @@
   ];
 
   const App = window.App = {
-    VERSION: '2026-10-17 — رسوم تفاعلية',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
+    VERSION: '2026-10-17 — المورد المتوقع في الشيكات',   // يتغير مع كل تحديث علشان نعرف المتصفح فاتح أنهي نسخة
     F, PAID_STATUS, REJECTED,
     state: { headers: [], rows: [], records: [], lists: {}, loaded: false, loadedAt: null },
     views: {},

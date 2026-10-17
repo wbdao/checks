@@ -15,6 +15,7 @@
     { k: 'cashState', t: 'حالة الصرف', v: r => App.cashBadge(r), sort: r => r.cashState },
     { k: 'status', t: 'الحاله', v: r => App.statusBadge(r), sort: r => r.status },
     { k: 'position', t: 'موقف الشيك', v: r => esc(r.position), sort: r => r.position },
+    { k: 'supplier', t: 'المورد المتوقع', v: r => esc(r.supplier), sort: r => r.supplier },
     { k: 'note', t: 'بيان / تذكير', v: r => `<span class="small">${esc(String(r.note || '').slice(0, 80))}</span>${r.remind ? `<span class="sub">🔔 ${esc(String(r.remind).slice(0, 60))}</span>` : ''}`, cls: 'wrap' },
   ];
 
@@ -208,7 +209,7 @@
         cols: [
         ['NN', r => r.id], ['العميل', r => r.name], ['شيك بأسم', r => r.drawer], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
         ['صافى الشيك', r => App.fmt(r.netN), { sum: r => r.netN, num: true }], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
-        ['الحاله', r => r.status], ['موقف الشيك', r => r.position], ['حالة الصرف', r => r.cashState],
+        ['الحاله', r => r.status], ['موقف الشيك', r => r.position], ['المورد المتوقع', r => r.supplier], ['حالة الصرف', r => r.cashState],
         ],
       });
       $('#shareBtn').addEventListener('click', () => App.share.open(shareCfg()));
