@@ -118,15 +118,16 @@
     const parts = [drill.sup === '*' ? 'كل الموردين' : drill.sup];
     if (drill.y) parts.push(drill.m !== '' && +drill.m ? `${MONTHS[drill.m - 1]} ${drill.y}` : drill.y);
     $('#trDetailTitle').textContent = `الشيكات: ${parts.join(' — ')}`;
-    $('#trTable thead').innerHTML = `<tr>${App.sel.head()}<th>NN</th><th>العميل</th><th>البنك / رقم الشيك</th><th>صافى الشيك</th><th>الاستحقاق</th><th>الحاله</th><th>موقف الشيك</th><th>المورد المتوقع</th><th>بيان / تذكير</th></tr>`;
+    $('#trTable thead').innerHTML = `<tr>${App.sel.head()}<th>NN</th><th>العميل</th><th>شيك بأسم</th><th>البنك / رقم الشيك</th><th>صافى الشيك</th><th>الاستحقاق</th><th>الحاله</th><th>موقف الشيك</th><th>المورد المتوقع</th><th>بيان / تذكير</th></tr>`;
     $('#trTable tbody').innerHTML = list.map(r => `<tr data-id="${esc(r.id)}">${App.sel.cell(r)}
       <td>${esc(r.id)}</td><td>${esc(r.name)}<span class="sub">${esc(r.code)}</span></td>
+      <td><span class="small">${esc(r.drawer)}</span></td>
       <td>${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span></td>
       <td><b class="num">${App.fmt(r.netN)}</b>${r.paidN ? `<span class="sub num">من ${App.fmt(r.amountN)}</span>` : ''}</td>
       <td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span><span class="sub">${esc(r.dueState)}</span></td>
       <td>${App.statusBadge(r)}</td><td>${esc(r.position)}</td><td>${esc(r.supplier)}</td>
       <td class="wrap small">${esc(String(r.note || '').slice(0, 100))}${r.remind ? `<span class="sub">🔔 ${esc(String(r.remind).slice(0, 60))}</span>` : ''}</td></tr>`).join('')
-      || '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">لا توجد شيكات</td></tr>';
+      || '<tr><td colspan="11" class="muted" style="text-align:center;padding:24px">لا توجد شيكات</td></tr>';
     $('#trFoot').innerHTML = `<span>${list.length} شيك</span><b class="num">صافى: ${App.fmt(sum(list))}</b>`;
     $('#trDetail').classList.remove('hidden');
     App.sel.sync($('#trTable'), list);
@@ -179,7 +180,7 @@
       const shareCfg = () => ({
         title: $('#trDetailTitle').textContent, file: 'treasury', rows: list,
         cols: [
-        ['NN', r => r.id], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
+        ['NN', r => r.id], ['العميل', r => r.name], ['شيك بأسم', r => r.drawer], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
         ['صافى الشيك', r => App.fmt(r.netN), { sum: r => r.netN, num: true }], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
         ['الحاله', r => r.status], ['موقف الشيك', r => r.position], ['المورد المتوقع', r => r.supplier],
         ],

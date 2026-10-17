@@ -446,7 +446,7 @@
       const shareCfg = () => ({
         title: $('#wWh').value ? `شيكات المخازن — ${whLabel($('#wWh').value)}` : 'شيكات المخازن', file: 'warehouse-checks', rows: list,
         cols: [
-          ['WH', r => r.whId], ['المخزن', r => whLabel(r.wh)], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
+          ['WH', r => r.whId], ['المخزن', r => whLabel(r.wh)], ['العميل', r => r.name], ['صاحب الشيك', r => r.drawer], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
           ['قيمة الشيك', r => App.fmt(r.amountN), { sum: r => r.amountN, num: true }], ['الصافي', r => App.fmt(r.netN), { sum: r => r.netN, num: true }],
           ['الاستحقاق', r => App.iso(r.dueD) || r.due], ['الموقف (mm)', r => r.state],
         ],

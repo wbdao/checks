@@ -18,6 +18,7 @@
     { k: 'id', t: 'NN', v: r => esc(r.id), s: r => r.id },
     { k: 'sup', t: 'موقف الشيك', v: r => `<b>${esc(r._sup)}</b>`, s: r => r._sup + '|' + (r.dueD ? App.iso(r.dueD) : '') },
     { k: 'name', t: 'العميل', v: r => `${esc(r.name)}<span class="sub">${esc(r.code)}</span>`, s: r => r.name },
+    { k: 'drawer', t: 'شيك بأسم', v: r => `<span class="small">${esc(r.drawer)}</span>`, s: r => String(r.drawer ?? '') },
     { k: 'bank', t: 'البنك / رقم الشيك', v: r => `${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span>`, s: r => r.bank },
     { k: 'net', t: 'قيمة الشيك', v: r => `<b class="num">${App.fmt(r.amountN)}</b>${r.paidN ? `<span class="sub num">${r.netN ? 'متبقي ' + App.fmt(r.netN) : 'مسدد بالكامل'}</span>` : ''}`, s: r => r.amountN },
     { k: 'due', t: 'الاستحقاق', v: r => `<span class="num">${esc(App.iso(r.dueD) || r.due)}</span><span class="sub">${esc(r.dueState)}</span>`, s: r => r.dueD ? +r.dueD : 0 },
@@ -127,7 +128,7 @@
       const shareCfg = () => ({
         title: $('#sSupplier').value ? `شيكات لدى المورد: ${$('#sSupplier').value}` : 'شيكات لدى الموردين', file: 'suppliers', rows: list,
         cols: [
-          ['موقف الشيك', r => r._sup], ['NN', r => r.id], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
+          ['موقف الشيك', r => r._sup], ['NN', r => r.id], ['العميل', r => r.name], ['شيك بأسم', r => r.drawer], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
           ['قيمة الشيك', r => App.fmt(r.amountN), { sum: r => r.amountN, num: true }], ['المتبقي', r => App.fmt(r.netN), { sum: r => r.netN, num: true }],
           ['الاستحقاق', r => App.iso(r.dueD) || r.due], ['خروج الشيك', r => App.iso(r._outD)], ['الحاله', r => r.status], ['حالة الصرف', r => r.cashState],
         ],

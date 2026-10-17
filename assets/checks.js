@@ -8,6 +8,7 @@
     { k: 'id', t: 'NN', v: r => esc(r.id), sort: r => r.id },
     { k: 'due', t: 'الاستحقاق', v: r => `<span class="num">${esc(App.iso(r.dueD) || r.due)}</span><span class="sub">${esc(r.dueState)}</span>`, sort: r => r.dueD ? +r.dueD : 0 },
     { k: 'name', t: 'العميل', v: r => `${esc(r.name)}<span class="sub">${esc(r.code)}</span>`, sort: r => r.name },
+    { k: 'drawer', t: 'شيك بأسم', v: r => `<span class="small">${esc(r.drawer)}</span>`, sort: r => String(r.drawer ?? '') },
     { k: 'wh', t: 'المخزن', v: r => esc(r.wh), sort: r => r.wh },
     { k: 'bank', t: 'البنك / رقم الشيك', v: r => `${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span>`, sort: r => r.bank },
     { k: 'net', t: 'الصافي', v: r => `<b class="num">${App.fmt(r.netN)}</b>${r.paidN ? `<span class="sub num">من ${App.fmt(r.amountN)}</span>` : ''}`, sort: r => r.netN },
@@ -205,7 +206,7 @@
       const shareCfg = () => ({
         title: 'الشيكات', file: 'checks', rows: filtered,
         cols: [
-        ['NN', r => r.id], ['العميل', r => r.name], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
+        ['NN', r => r.id], ['العميل', r => r.name], ['شيك بأسم', r => r.drawer], ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo],
         ['صافى الشيك', r => App.fmt(r.netN), { sum: r => r.netN, num: true }], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
         ['الحاله', r => r.status], ['موقف الشيك', r => r.position], ['حالة الصرف', r => r.cashState],
         ],

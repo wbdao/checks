@@ -43,7 +43,7 @@
       if (x.checkNo && keys.has(k)) { if (!inWh.has(k)) inWh.set(k, x); continue; }
       const open = w.isOpen(x);
       extra.push({
-        src: 'wh', ref: x, id: x.whId || 'صف ' + x._rowNum, code: x.code, name: x.name,
+        src: 'wh', ref: x, id: x.whId || 'صف ' + x._rowNum, code: x.code, name: x.name, drawer: x.drawer,
         wh: w.whName(x.wh) || x.wh, bank: x.bank, checkNo: x.checkNo, due: x.due, dueD: x.dueD, recvD: x.recvD,
         dueState: x.dueState, netN: open ? x.netN : x.amountN,   // المفتوح بالمتبقي، والخالص/المردود بقيمته
         isPaid: w.isPaid(x), isReturned: w.isReturned(x), isRejected: false,
@@ -238,7 +238,7 @@
           <button type="button" class="btn ghost" id="dShare">📤 مشاركة</button>
         </div>
         <div class="table-wrap"><table class="grid" id="dTable"><thead><tr>
-          <th>الشيت</th><th>NN / WH</th><th>الاستحقاق</th><th>البنك / رقم الشيك</th><th>الصافي</th><th>حالة الصرف</th><th>الحاله</th><th>موقف الشيك</th><th>بيان</th>
+          <th>الشيت</th><th>NN / WH</th><th>شيك بأسم</th><th>الاستحقاق</th><th>البنك / رقم الشيك</th><th>الصافي</th><th>حالة الصرف</th><th>الحاله</th><th>موقف الشيك</th><th>بيان</th>
         </tr></thead><tbody></tbody></table></div>
       </div>`;
 
@@ -251,20 +251,20 @@
         const twin = r.src ? null : inWh.get(r.code + '|' + r.checkNo);
         return `<tr data-id="${esc(r.id)}" data-src="${r.src || 'main'}">
         <td>${r.src ? '<span class="badge info">المخازن</span>' : '<span class="badge">الشيكات</span>'}</td>
-        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span>${isOpen(r) && !isDeposit(r) && r.dueD && daysLate(r, t) > 0
+        <td>${esc(r.id)}${twin ? `<span class="sub" title="نفس الشيك موجود في شيت المخازن">+ مخازن ${esc(twin.whId || 'صف ' + twin._rowNum)}</span>` : ''}</td><td><span class="small">${esc(r.drawer)}</span></td><td><span class="num">${esc(App.iso(r.dueD) || r.due)}</span>${isOpen(r) && !isDeposit(r) && r.dueD && daysLate(r, t) > 0
           ? `<span class="sub" style="color:var(--bad)">متأخر ${daysLate(r, t)} يوم</span>` : `<span class="sub">${esc(r.dueState)}</span>`}</td>
         <td>${esc(r.bank)}<span class="sub num">${esc(r.checkNo)}</span></td><td><b class="num">${App.fmt(r.netN)}</b></td>
         <td>${r.src ? w.stateBadge(r.ref) : App.cashBadge(r)}</td><td>${r.src ? '' : App.statusBadge(r)}</td><td>${esc(r.position)}</td>
         <td class="wrap small">${esc(String(r.note || '').slice(0, 90))}</td></tr>`;
       }).join('')
-        || '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">لا توجد شيكات</td></tr>';
+        || '<tr><td colspan="11" class="muted" style="text-align:center;padding:24px">لا توجد شيكات</td></tr>';
     };
     drawTable();
     $('#dOpenOnly').addEventListener('change', drawTable);
     const shareCfg = () => ({
       title: `شيكات العميل: ${c.name} (${c.code})`, file: 'customer-' + c.code, rows: shown,
       cols: [
-        ['الشيت', r => r.src ? 'المخازن' : 'الشيكات'], ['NN / WH', r => r.id], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
+        ['الشيت', r => r.src ? 'المخازن' : 'الشيكات'], ['NN / WH', r => r.id], ['شيك بأسم', r => r.drawer], ['الاستحقاق', r => App.iso(r.dueD) || r.due],
         ['البنك', r => r.bank], ['رقم الشيك', r => r.checkNo], ['الصافي', r => App.fmt(r.netN), { sum: r => r.netN, num: true }],
         ['الحاله', r => r.status || (r.ref && r.ref.state) || ''], ['موقف الشيك', r => r.position],
       ],
