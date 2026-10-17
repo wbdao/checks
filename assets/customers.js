@@ -5,6 +5,7 @@
   const PAGE = 50;
   const charts = {};
   let sortKey = 'open', sortAsc = false, page = 0, rows = [];
+  let ovPick = null;   // اختيار من رسم «الاستحقاقات المفتوحة» بيفلتر جدول العملاء
 
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const C = () => ({ ok: css('--ok'), bad: css('--bad'), warn: css('--warn'), info: css('--info'), primary: css('--primary'), muted: css('--muted'), border: css('--border'), text: css('--text') });
@@ -17,8 +18,23 @@
     Chart.defaults.font.family = 'Cairo, system-ui, sans-serif';
     Chart.defaults.color = c.muted;
     Chart.defaults.borderColor = c.border;
+    // الرسوم اللي بتتضغط: شكل الماوس إيد فوق العواميد
+    if (cfg.options && cfg.options.onClick) cfg.options.onHover = (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; };
     charts[id] = new Chart(document.getElementById(id), cfg);
   }
+
+  // ===== الرسوم التفاعلية: الضغط على عمود أو جزء بيفلتر الجدول اللي تحته، والضغط عليه تاني بيلغي =====
+  // pick = { chart, index, ds, label, fn } — العنصر المختار بيفضل بلونه والباقي بيبهت
+  const fadeHex = c => /^#[0-9a-f]{6}$/i.test(c) ? c + '44' : c;
+  const pickColor = (getPick, id, base) => ctx => {
+    const p = getPick(), b = Array.isArray(base) ? base[ctx.dataIndex % base.length] : typeof base === 'function' ? base(ctx) : base;
+    if (!p || p.chart !== id) return b;
+    return p.index === ctx.dataIndex && (p.ds == null || p.ds === ctx.datasetIndex) ? b : fadeHex(b);
+  };
+  const samePick = (a, b) => a && b && a.chart === b.chart && a.index === b.index && a.ds === b.ds;
+  const pickChip = p => p ? `<span class="chip">📊 <b>${esc(p.label)}</b><button type="button" class="rm" data-unpick title="إلغاء الفلتر">✕</button></span>` : '';
+  const recolor = () => Object.values(charts).forEach(ch => ch && ch.update('none'));
+  const HINT = '<span class="muted small" style="font-weight:400"> — اضغط على أي جزء لعرض شيكاته</span>';
   const moneyTick = { callback: v => App.fmtShort(v) };
   const moneyTip = { callbacks: { label: ctx => `${ctx.dataset.label ? ctx.dataset.label + ': ' : ''}${App.fmt(ctx.parsed.x ?? ctx.parsed.y ?? ctx.parsed)}` } };
   const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -171,17 +187,32 @@
     const keys = [];
     for (let i = 0; i < 12; i++) { const d = new Date(m0.getFullYear(), m0.getMonth() + i, 1); keys.push(monthKey(d)); labels.push(d.toLocaleDateString('ar-EG', { month: 'short', year: '2-digit' })); vals.push(0); }
     open.forEach(r => { if (r.dueD && r.dueD > t) { const i = keys.indexOf(monthKey(r.dueD)); if (i >= 0) vals[i + 1] += r.netN; } });
+    // الضغط على شهر بيفلتر جدول العملاء على اللي عندهم شيكات مفتوحة في الشهر ده (والضغط تاني بيلغي)
+    const inBucket = (r, i) => isOpen(r) && r.dueD && (i === 0 ? r.dueD <= t : r.dueD > t && monthKey(r.dueD) === keys[i - 1]);
     chart('chUpcoming', {
       type: 'bar',
-      data: { labels, datasets: [{ label: 'القيمة', data: vals, backgroundColor: vals.map((_, i) => i === 0 ? col.bad : col.primary) }] },
-      options: { maintainAspectRatio: false, scales: { y: { ticks: moneyTick } }, plugins: { legend: { display: false }, tooltip: moneyTip } },
+      data: { labels, datasets: [{ label: 'القيمة', data: vals, backgroundColor: pickColor(() => ovPick, 'u', vals.map((_, i) => i === 0 ? col.bad : col.primary)) }] },
+      options: {
+        maintainAspectRatio: false, scales: { y: { ticks: moneyTick } }, plugins: { legend: { display: false }, tooltip: moneyTip },
+        onClick: (e, els) => {
+          const el = els[0]; if (!el) return;
+          const p = { chart: 'u', index: el.index, ds: null, label: el.index === 0 ? 'عندهم شيكات متأخرة' : `عندهم استحقاقات ${labels[el.index]}`, fn: c => c.list.some(r => inBucket(r, el.index)) };
+          setOvPick(p);
+        },
+      },
     });
+  }
+  function setOvPick(p) {
+    ovPick = !p || samePick(p, ovPick) ? null : p;
+    page = 0; table(aggregate(allRecs())); recolor();
+    if (ovPick) $('#custTable').closest('.table-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function table(all) {
     const q = $('#cSearch').value.trim().toLowerCase(), wh = $('#cWh').value, openOnly = $('#cOpenOnly').checked, cm = $('#cCommit').value;
     rows = all.filter(c => (!q || (c.code + ' ' + c.name).toLowerCase().includes(q)) && (!wh || c.wh === wh) && (!openOnly || c.open > 0) &&
-      (!cm || (cm === 'none' ? c.commit.pct == null : c.commit.label === cm)));
+      (!cm || (cm === 'none' ? c.commit.pct == null : c.commit.label === cm)) && (!ovPick || ovPick.fn(c)));
+    $('#cPick').innerHTML = pickChip(ovPick);
     rows.sort((a, b) => { const x = a[sortKey] ?? '', y = b[sortKey] ?? ''; return (x > y ? 1 : x < y ? -1 : 0) * (sortAsc ? 1 : -1); });
     $('#custTable thead').innerHTML = `<tr>${COLS.map(c => `<th data-k="${c.k}" class="${c.k === sortKey ? 'sorted' + (sortAsc ? ' asc' : '') : ''}">${c.t}</th>`).join('')}</tr>`;
     const pages = Math.max(1, Math.ceil(rows.length / PAGE));
@@ -225,13 +256,13 @@
         ['مرفوض / استبدال', `${c.rejected} / ${c.replaced}`, c.rejected ? `مرفوض بقيمة ${App.fmtShort(c.rejectedAmt)}` : '', c.rejected ? 'bad' : ''],
       ].map(([l, v, s, k]) => `<div class="kpi ${k}"><div class="lbl">${l}</div><div class="val">${v}</div><div class="sub">${s}</div></div>`).join('')}</div>
       <div class="cols">
-        <div class="card chart-card"><h3>الشيكات حسب شهر الاستحقاق</h3><div class="chart-box"><canvas id="chCustMonthly"></canvas></div></div>
-        <div class="card chart-card"><h3>حالة الصرف</h3><div class="chart-box"><canvas id="chCustCash"></canvas></div></div>
-        <div class="card chart-card"><h3>البنوك</h3><div class="chart-box"><canvas id="chCustBank"></canvas></div></div>
+        <div class="card chart-card"><h3>الشيكات حسب شهر الاستحقاق${HINT}</h3><div class="chart-box"><canvas id="chCustMonthly"></canvas></div></div>
+        <div class="card chart-card"><h3>حالة الصرف${HINT}</h3><div class="chart-box"><canvas id="chCustCash"></canvas></div></div>
+        <div class="card chart-card"><h3>البنوك${HINT}</h3><div class="chart-box"><canvas id="chCustBank"></canvas></div></div>
       </div>
       <div class="card table-card">
         <div class="filters" style="margin:0;border-bottom:1px solid var(--border)">
-          <div class="section-title"><h3>شيكات العميل</h3></div><span class="grow"></span>
+          <div class="section-title"><h3>شيكات العميل</h3></div><span id="dPick" class="chips-inline"></span><span class="grow"></span>
           <select id="dSrc" autocomplete="off"><option value="">الشيتين</option><option value="main">شيت الشيكات</option><option value="wh">شيت المخازن</option></select>
           <label class="inline chk"><input type="checkbox" id="dOpenOnly" ${c.open ? 'checked' : ''}> غير الخالص فقط</label>
           <button type="button" class="btn ghost" id="dCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
@@ -244,9 +275,11 @@
 
     const w = WH();
     let shown = [];   // الشيكات الظاهرة في الجدول (للمشاركة)
+    let pick = null;  // العنصر المختار من الرسوم
     const drawTable = () => {
       const only = $('#dOpenOnly').checked, src = $('#dSrc').value;
-      const list = shown = c.list.filter(r => (!only || isOpen(r)) && (!src || (r.src || 'main') === src)).sort((a, b) => (b.dueD || 0) - (a.dueD || 0));
+      $('#dPick').innerHTML = pickChip(pick);
+      const list = shown = c.list.filter(r => (!only || isOpen(r)) && (!src || (r.src || 'main') === src) && (!pick || pick.fn(r))).sort((a, b) => (b.dueD || 0) - (a.dueD || 0));
       $('#dTable tbody').innerHTML = list.map(r => {
         const twin = r.src ? null : inWh.get(r.code + '|' + r.checkNo);
         return `<tr data-id="${esc(r.id)}" data-src="${r.src || 'main'}">
@@ -260,6 +293,14 @@
         || '<tr><td colspan="11" class="muted" style="text-align:center;padding:24px">لا توجد شيكات</td></tr>';
     };
     drawTable();
+    // الضغط على الرسم: نفس العنصر تاني = إلغاء. «غير الخالص فقط» بيتشال علشان الخالص يظهر لو اخترته
+    const setPick = p => {
+      pick = !p || samePick(p, pick) ? null : p;
+      if (pick) $('#dOpenOnly').checked = false;
+      drawTable(); recolor();
+      if (pick) $('#dTable').closest('.table-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+    $('#dPick').addEventListener('click', e => { if (e.target.closest('[data-unpick]')) setPick(null); });
     $('#dOpenOnly').addEventListener('change', drawTable);
     const shareCfg = () => ({
       title: `شيكات العميل: ${c.name} (${c.code})`, file: 'customer-' + c.code, rows: shown,
@@ -294,33 +335,50 @@
         keys.push(monthKey(d)); labels.push(d.toLocaleDateString('ar-EG', { month: 'short', year: '2-digit' }));
       }
       const paid = keys.map(() => 0), openOver = keys.map(() => 0), openFut = keys.map(() => 0);
+      const cat = r => r.isReturned ? -1 : r.isPaid ? 0 : r.dueD <= t ? 1 : 2;   // نفس ترتيب الأعمدة: خالص، متأخر، لم يستحق
       dated.forEach(r => {
-        const i = keys.indexOf(monthKey(r.dueD)); if (i < 0 || r.isReturned) return;
-        if (r.isPaid) paid[i] += r.netN; else if (r.dueD <= t) openOver[i] += r.netN; else openFut[i] += r.netN;
+        const i = keys.indexOf(monthKey(r.dueD)); if (i < 0) return;
+        const k = cat(r); if (k < 0) return;
+        [paid, openOver, openFut][k][i] += r.netN;
       });
+      const DS = [['خالص', paid, col.ok], ['متأخر', openOver, col.bad], ['لم يستحق', openFut, col.warn]];
       chart('chCustMonthly', {
         type: 'bar',
-        data: { labels, datasets: [
-          { label: 'خالص', data: paid, backgroundColor: col.ok },
-          { label: 'متأخر', data: openOver, backgroundColor: col.bad },
-          { label: 'لم يستحق', data: openFut, backgroundColor: col.warn },
-        ] },
-        options: { maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, ticks: moneyTick } }, plugins: { tooltip: moneyTip, legend: { position: 'bottom' } } },
+        data: { labels, datasets: DS.map(([label, data, color]) => ({ label, data, backgroundColor: pickColor(() => pick, 'm', color) })) },
+        options: {
+          maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, ticks: moneyTick } }, plugins: { tooltip: moneyTip, legend: { position: 'bottom' } },
+          onClick: (e, els) => {
+            const el = els[0]; if (!el) return;
+            const key = keys[el.index], ds = el.datasetIndex;
+            setPick({ chart: 'm', index: el.index, ds, label: `${labels[el.index]} — ${DS[ds][0]}`, fn: r => r.dueD && monthKey(r.dueD) === key && cat(r) === ds });
+          },
+        },
       });
     }
 
     const group = key => { const m = new Map(); c.list.forEach(r => { const k = r[key] || 'غير محدد'; m.set(k, (m.get(k) || 0) + r.netN); }); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
-    const cash = group('cashState');
+    const byKey = (key, label, chartId) => (e, els) => {
+      const el = els[0]; if (!el) return;
+      const v = label[el.index];
+      setPick({ chart: chartId, index: el.index, ds: null, label: v, fn: r => (r[key] || 'غير محدد') === v });
+    };
+    const cash = group('cashState'), cashL = cash.map(x => x[0]);
     chart('chCustCash', {
       type: 'doughnut',
-      data: { labels: cash.map(x => x[0]), datasets: [{ data: cash.map(x => x[1]), backgroundColor: PALETTE, borderColor: css('--surface') }] },
-      options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } }, tooltip: { callbacks: { label: x => `${x.label}: ${App.fmt(x.parsed)}` } } } },
+      data: { labels: cashL, datasets: [{ data: cash.map(x => x[1]), backgroundColor: pickColor(() => pick, 'c', PALETTE), borderColor: css('--surface') }] },
+      options: {
+        maintainAspectRatio: false, onClick: byKey('cashState', cashL, 'c'),
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } }, tooltip: { callbacks: { label: x => `${x.label}: ${App.fmt(x.parsed)}` } } },
+      },
     });
-    const banks = group('bank').slice(0, 8);
+    const banks = group('bank').slice(0, 8), bankL = banks.map(x => x[0]);
     chart('chCustBank', {
       type: 'bar',
-      data: { labels: banks.map(x => x[0]), datasets: [{ data: banks.map(x => x[1]), backgroundColor: col.primary }] },
-      options: { indexAxis: 'y', maintainAspectRatio: false, scales: { x: { ticks: moneyTick }, y: { position: 'right' } }, plugins: { legend: { display: false }, tooltip: moneyTip } },
+      data: { labels: bankL, datasets: [{ data: banks.map(x => x[1]), backgroundColor: pickColor(() => pick, 'b', col.primary) }] },
+      options: {
+        indexAxis: 'y', maintainAspectRatio: false, onClick: byKey('bank', bankL, 'b'),
+        scales: { x: { ticks: moneyTick }, y: { position: 'right' } }, plugins: { legend: { display: false }, tooltip: moneyTip },
+      },
     });
   }
 
@@ -344,6 +402,7 @@
       $('#cSearch').addEventListener('input', App.debounce(re));
       $('#cWh').addEventListener('change', re);
       $('#cCommit').addEventListener('change', re);
+      $('#cPick').addEventListener('click', e => { if (e.target.closest('[data-unpick]')) setOvPick(null); });
       // نسخ جدول العملاء (كل النتايج بعد الفلتر، مش الصفحة الظاهرة بس)
       $('#cCopy').addEventListener('click', () => App.share.copyTable({
         title: 'تحليل العملاء', unit: 'عميل', rows,

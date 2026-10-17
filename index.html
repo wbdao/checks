@@ -7,7 +7,7 @@
 <title>إدارة الشيكات</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="assets/style.css?v=20261017-c2">
+<link rel="stylesheet" href="assets/style.css?v=20261017-c3">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -75,14 +75,15 @@
     <div id="custOverview">
       <div class="kpis" id="custKpis"></div>
       <div class="cols">
-        <div class="card chart-card"><h3>أعلى 10 عملاء بالرصيد المفتوح</h3><div class="chart-box tall"><canvas id="chTopOpen"></canvas></div></div>
-        <div class="card chart-card"><h3>الاستحقاقات المفتوحة — الأشهر القادمة</h3><div class="chart-box tall"><canvas id="chUpcoming"></canvas></div></div>
+        <div class="card chart-card"><h3>أعلى 10 عملاء بالرصيد المفتوح<span class="muted small" style="font-weight:400"> — اضغط على العميل لفتح صفحته</span></h3><div class="chart-box tall"><canvas id="chTopOpen"></canvas></div></div>
+        <div class="card chart-card"><h3>الاستحقاقات المفتوحة — الأشهر القادمة<span class="muted small" style="font-weight:400"> — اضغط على شهر لعرض عملاءه</span></h3><div class="chart-box tall"><canvas id="chUpcoming"></canvas></div></div>
       </div>
       <div class="card filters">
         <input type="search" id="cSearch" autocomplete="off" placeholder="بحث باسم العميل أو الكود…">
         <select id="cWh" autocomplete="off"><option value="">كل المخازن</option></select>
         <select id="cCommit" autocomplete="off" title="الالتزام بالسداد في مواعيد الشيكات"><option value="">كل درجات الالتزام</option><option>ممتاز</option><option>جيد</option><option>متوسط</option><option>ضعيف</option><option value="none">لا يوجد مستحق</option></select>
         <label class="inline chk"><input type="checkbox" id="cOpenOnly" autocomplete="off" checked> عملاء لديهم رصيد مفتوح فقط</label>
+        <span id="cPick" class="chips-inline"></span>
         <span class="grow"></span>
         <button class="btn ghost" id="cCopy" title="نسخ الجدول علشان تلصقه في Excel أو Google Sheets أو Word">📋 نسخ كجدول</button>
       </div>
@@ -395,14 +396,14 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="assets/core.js?v=20261017-c2"></script>
-<script src="assets/share.js?v=20261017-c2"></script>
-<script src="assets/bulk.js?v=20261017-c2"></script>
-<script src="assets/checks.js?v=20261017-c2"></script>
-<script src="assets/customers.js?v=20261017-c2"></script>
-<script src="assets/import.js?v=20261017-c2"></script>
-<script src="assets/suppliers.js?v=20261017-c2"></script>
-<script src="assets/treasury.js?v=20261017-c2"></script>
-<script src="assets/warehouses.js?v=20261017-c2"></script>
+<script src="assets/core.js?v=20261017-c3"></script>
+<script src="assets/share.js?v=20261017-c3"></script>
+<script src="assets/bulk.js?v=20261017-c3"></script>
+<script src="assets/checks.js?v=20261017-c3"></script>
+<script src="assets/customers.js?v=20261017-c3"></script>
+<script src="assets/import.js?v=20261017-c3"></script>
+<script src="assets/suppliers.js?v=20261017-c3"></script>
+<script src="assets/treasury.js?v=20261017-c3"></script>
+<script src="assets/warehouses.js?v=20261017-c3"></script>
 </body>
 </html>
