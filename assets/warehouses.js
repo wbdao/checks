@@ -12,6 +12,7 @@
   };
   const COMPUTED = ['net', 'dueState', 'lookup', 'whId'];   // معادلات أو كود تلقائي — لا تُكتب من الموقع
   const PAID = 'خالص';
+  const STATES = [PAID, 'تم رد الشيك', 'NN'];   // اختيارات الموقف (mm) — أي قيمة تانية في الشيت مش بتظهر في القايمة
   let loading = false, list = [], whName = new Map(), raw = null;
 
   const isPaid = r => r.state === PAID;
@@ -193,8 +194,7 @@
     if (!App.state.wh) { load(); return; }
     prepare();
     diagnose();
-    const states = [...new Set(records.map(r => r.state).filter(Boolean))];
-    App.fillSelect($('#wState'), states);
+    App.fillSelect($('#wState'), STATES);
     idNotice(records); kpis(records); summary(records); table(records); datalists();
   }
 
@@ -268,10 +268,9 @@
     const host = $('#datalists'); if (!host) return;
     ['dl-whcodes', 'dl-whstate'].forEach(id => host.querySelector('#' + id)?.remove());
     const codes = [...new Set([...whName.keys(), ...records.map(r => r.wh)].filter(Boolean))].sort((a, b) => a - b);
-    const states = [...new Set(['خالص', 'NN', 'تم رد الشيك', ...records.map(r => r.state)].filter(Boolean))];
     host.insertAdjacentHTML('beforeend',
       `<datalist id="dl-whcodes">${codes.map(c => `<option value="${esc(c)}">${esc(whName.get(c) || '')}</option>`).join('')}</datalist>` +
-      `<datalist id="dl-whstate">${states.map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist>`);
+      `<datalist id="dl-whstate">${STATES.map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist>`);
   }
 
   function openForm(rec, preset) {
